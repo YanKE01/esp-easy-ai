@@ -1,6 +1,28 @@
 <script setup lang="ts">
-import * as echarts from 'echarts'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { LineChart, type LineSeriesOption } from 'echarts/charts'
+import {
+  DataZoomComponent,
+  GridComponent,
+  LegendComponent,
+  TooltipComponent,
+  type DataZoomComponentOption,
+  type GridComponentOption,
+  type LegendComponentOption,
+  type TooltipComponentOption,
+} from 'echarts/components'
+import { init, use, type ComposeOption, type ECharts } from 'echarts/core'
+import { CanvasRenderer } from 'echarts/renderers'
+
+use([LineChart, GridComponent, LegendComponent, TooltipComponent, DataZoomComponent, CanvasRenderer])
+
+type WaveformChartOption = ComposeOption<
+  | LineSeriesOption
+  | GridComponentOption
+  | LegendComponentOption
+  | TooltipComponentOption
+  | DataZoomComponentOption
+>
 
 interface ChannelSeries {
   id: number
@@ -16,11 +38,11 @@ interface Props {
 const props = defineProps<Props>()
 
 const chartRef = ref<HTMLElement | null>(null)
-let chart: echarts.ECharts | null = null
+let chart: ECharts | null = null
 
 const hasData = computed(() => props.channels.some((channel) => channel.values.length > 0))
 
-function buildOption(): echarts.EChartsOption {
+function buildOption(): WaveformChartOption {
   const maxLength = Math.max(...props.channels.map((channel) => channel.values.length), 0)
   const xValues = Array.from({ length: maxLength }, (_, index) => index)
 
@@ -189,7 +211,7 @@ function renderChart() {
   }
 
   if (!chart) {
-    chart = echarts.init(chartRef.value)
+    chart = init(chartRef.value)
   }
 
   chart.setOption(buildOption(), true)
@@ -224,10 +246,13 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="waveform-echart">
-    <div v-if="!hasData" class="waveform-echart-empty">
+  <div class="overflow-hidden rounded-[1.25rem] border border-slate-200 bg-white">
+    <div
+      v-if="!hasData"
+      class="flex min-h-80 items-center justify-center px-6 text-center text-sm leading-7 text-slate-500"
+    >
       Select one category to preview a single row of data.
     </div>
-    <div v-else ref="chartRef" class="waveform-echart-canvas"></div>
+    <div v-else ref="chartRef" class="h-80 w-full md:h-[28rem]"></div>
   </div>
 </template>
