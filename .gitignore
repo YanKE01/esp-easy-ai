@@ -1,6 +1,3 @@
-web/node_modules/
-web/dist/
-web/.pnpm-store/
 .venv/
 venv/
 __pycache__/

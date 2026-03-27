@@ -1,72 +1,25 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import AppSidebar from './components/AppSidebar.vue'
 import TopBar from './components/TopBar.vue'
-import Sidebar from './components/Sidebar.vue'
-import InfoPlaceholder from './components/InfoPlaceholder.vue'
-import TimeSeriesView from './views/TimeSeriesView.vue'
+
+import { ArrowUp10, SendToBack, Images as ImagesIcon } from '@lucide/vue'
 
 const navItems = [
-  { label: 'Overview' },
-  { label: '1D' },
-  { label: 'Image' },
+  { label: 'Overview', to: '/overview', icon: SendToBack },
+  { label: '1-D', to: '/one-d/dataset', activePrefix: '/one-d/', icon: ArrowUp10 },
+  { label: 'Image', to: '/image', icon: ImagesIcon },
 ]
-
-const activeItem = ref('Overview')
-
-const placeholderViews = {
-  Overview: {
-    eyebrow: 'Project Scope',
-    title: 'ESP EASY AI Workbench',
-    description:
-      'Build edge AI workflows by data shape. Start from the 1D workspace, then extend the same product line to image tasks later.',
-    centered: true,
-    large: true,
-    bullets: [
-      '1D is the active workbench for dataset setup, training, and emulation',
-      'Dataset should define the data type so later steps inherit the same assumption',
-      'Image remains a separate lane for future 2D workflows',
-    ],
-  },
-  Image: {
-    eyebrow: 'Image Workspace',
-    title: 'Image Pipeline',
-    description:
-      'This area is reserved for the later image workflow after the 1D training path is settled.',
-    bullets: [
-      'Planned for image-oriented datasets and training tasks',
-      'Kept separate from 1D so input shape and workflow assumptions stay clean',
-    ],
-  },
-}
-
-const currentView = computed(() => {
-  if (activeItem.value === '1D') {
-    return {
-      component: TimeSeriesView,
-      props: {},
-    }
-  }
-
-  return {
-    component: InfoPlaceholder,
-    props: placeholderViews[activeItem.value as keyof typeof placeholderViews],
-  }
-})
 </script>
 
 <template>
-  <div class="app-shell">
+  <div class="min-h-screen bg-[radial-gradient(circle_at_top_right,rgba(34,89,170,0.1),transparent_24%),linear-gradient(180deg,#eef3fb_0%,#f7f9fc_100%)] text-[#13233f]">
     <TopBar />
 
-    <div class="workspace">
-      <Sidebar
-        :items="navItems"
-        :active-item="activeItem"
-        @select="activeItem = $event"
-      />
+    <div class="flex min-h-[calc(100vh-50px)] pt-0">
+      <AppSidebar :items="navItems" />
 
-      <main class="content">
-        <component :is="currentView.component" v-bind="currentView.props" />
+      <main class="min-w-0 flex-1 bg-[#fafafa] p-0">
+        <RouterView />
       </main>
     </div>
   </div>
