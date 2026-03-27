@@ -37,6 +37,11 @@ interface Props {
 
 const props = defineProps<Props>()
 
+function formatPreviewValue(value: number) {
+  if (!Number.isFinite(value)) return String(value)
+  return value.toFixed(2)
+}
+
 const chartRef = ref<HTMLElement | null>(null)
 let chart: ECharts | null = null
 
@@ -95,7 +100,7 @@ function buildOption(): WaveformChartOption {
             const value = Array.isArray(item.data) ? item.data[1] : item.data
             return `<div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
               <span style="display:inline-block;width:8px;height:8px;border-radius:999px;background:${item.color};"></span>
-              <span>${item.seriesName}: <strong>${Number(value).toFixed(0)}</strong></span>
+              <span>${item.seriesName}: <strong>${formatPreviewValue(Number(value))}</strong></span>
             </div>`
           })
           .join('')

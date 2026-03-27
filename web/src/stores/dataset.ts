@@ -6,7 +6,7 @@ export type DatasetFile = File & {
 }
 
 interface DatasetKind {
-  id: 'time-series' | 'data-classification'
+  id: 'data-classification' | 'regression'
   label: string
   summary: string
 }
@@ -21,14 +21,14 @@ interface CategoryOption {
 
 const datasetKinds: DatasetKind[] = [
   {
-    id: 'time-series',
-    label: 'Time Series',
-    summary: 'For continuous sequences where one series is one sample.',
-  },
-  {
     id: 'data-classification',
     label: 'Data Classification',
-    summary: 'For non-sequence 1D data where one row is one sample.',
+    summary: 'For 1D data where one row is one sample.',
+  },
+  {
+    id: 'regression',
+    label: 'Regression',
+    summary: 'For 1D data where one row is one sample with numeric targets.',
   },
 ]
 
@@ -44,6 +44,10 @@ function getRelativeSegments(file?: DatasetFile) {
 
 function getDatasetSection(file: DatasetFile) {
   return getRelativeSegments(file)[1] ?? ''
+}
+
+function getRegressionSection(file: DatasetFile) {
+  return getRelativeSegments(file)[2] ?? ''
 }
 
 function getDatasetFileName(file: DatasetFile) {
@@ -80,15 +84,43 @@ export const useDatasetStore = defineStore('dataset', () => {
   const isChannelDialogOpen = ref(false)
   const previewCategory = ref('')
   const previewRowValues = ref<number[]>([])
+  const previewTargetValue = ref<number | null>(null)
   const previewRowSource = ref('')
   const previewError = ref('')
   const isPreviewLoading = ref(false)
 
   const isDataClassification = computed(() => activeKind.value === 'data-classification')
+  const isRegression = computed(() => activeKind.value === 'regression')
   const currentKind = computed(() => datasetKinds.find((kind) => kind.id === activeKind.value))
   const canConfirmChannels = computed(() => Number(pendingNumberOfChannels.value) > 0)
 
   const categoryOptions = computed<CategoryOption[]>(() => {
+    if (isRegression.value) {
+      const options: CategoryOption[] = []
+      const trainFile = uploadedDatasetFiles.value.find((file) => getRegressionSection(file) === 'train')
+      const testFile = uploadedDatasetFiles.value.find((file) => getRegressionSection(file) === 'test')
+
+      if (trainFile) {
+        options.push({
+          key: 'train',
+          label: 'Train',
+          trainFile,
+          previewFile: trainFile,
+        })
+      }
+
+      if (testFile) {
+        options.push({
+          key: 'test',
+          label: 'Test',
+          testFile,
+          previewFile: testFile,
+        })
+      }
+
+      return options
+    }
+
     const categoryMap = new Map<string, CategoryOption>()
 
     uploadedDatasetFiles.value.forEach((file) => {
@@ -153,6 +185,7 @@ export const useDatasetStore = defineStore('dataset', () => {
   function resetPreviewState() {
     previewCategory.value = ''
     previewRowValues.value = []
+    previewTargetValue.value = null
     previewRowSource.value = ''
     previewError.value = ''
     isPreviewLoading.value = false
@@ -172,12 +205,10 @@ export const useDatasetStore = defineStore('dataset', () => {
   }
 
   function setActiveKind(kindId: DatasetKind['id']) {
-    if (activeKind.value === kindId) {
-      return
+    if (activeKind.value !== kindId) {
+      activeKind.value = kindId
+      resetDatasetSelection()
     }
-
-    activeKind.value = kindId
-    resetDatasetSelection()
   }
 
   function handleFileSelection(files: DatasetFile[]) {
@@ -186,25 +217,19 @@ export const useDatasetStore = defineStore('dataset', () => {
       return
     }
 
-    if (isDataClassification.value) {
-      uploadedDatasetFiles.value = files
-      uploadedFolderName.value = getRelativeSegments(files[0])[0] ?? ''
-      uploadedFileCount.value = files.length
-      trainFileCount.value = files.filter((file) => getDatasetSection(file) === 'train').length
-      testFileCount.value = files.filter((file) => getDatasetSection(file) === 'test').length
-      uploadedFileName.value = ''
-      resetPreviewState()
-      pendingNumberOfChannels.value = numberOfChannels.value
-      isChannelDialogOpen.value = files.length > 0
-      return
-    }
-
-    uploadedDatasetFiles.value = []
-    uploadedFileName.value = files[0]?.name ?? ''
-    uploadedFolderName.value = ''
+    uploadedDatasetFiles.value = files
+    uploadedFolderName.value = getRelativeSegments(files[0])[0] ?? ''
     uploadedFileCount.value = files.length
-    trainFileCount.value = 0
-    testFileCount.value = 0
+    trainFileCount.value = files.filter((file) =>
+      isRegression.value ? getRegressionSection(file) === 'train' : getDatasetSection(file) === 'train',
+    ).length
+    testFileCount.value = files.filter((file) =>
+      isRegression.value ? getRegressionSection(file) === 'test' : getDatasetSection(file) === 'test',
+    ).length
+    uploadedFileName.value = ''
+    resetPreviewState()
+    pendingNumberOfChannels.value = numberOfChannels.value
+    isChannelDialogOpen.value = files.length > 0
   }
 
   async function loadPreviewRow() {
@@ -236,10 +261,22 @@ export const useDatasetStore = defineStore('dataset', () => {
         throw new Error('The selected row contains non-numeric values.')
       }
 
-      previewRowValues.value = values
+      if (isRegression.value) {
+        if (values.length < 2) {
+          throw new Error('The selected regression row must contain input values and one target value.')
+        }
+
+        previewRowValues.value = values.slice(0, -1)
+        previewTargetValue.value = values[values.length - 1] ?? null
+      } else {
+        previewRowValues.value = values
+        previewTargetValue.value = null
+      }
+
       previewRowSource.value = getDatasetFileName(selectedCategory.previewFile)
     } catch (error) {
       previewRowValues.value = []
+      previewTargetValue.value = null
       previewRowSource.value = ''
       previewError.value = error instanceof Error ? error.message : 'Failed to read the preview row.'
     } finally {
@@ -289,10 +326,12 @@ export const useDatasetStore = defineStore('dataset', () => {
     isChannelDialogOpen,
     previewCategory,
     previewRowValues,
+    previewTargetValue,
     previewRowSource,
     previewError,
     isPreviewLoading,
     isDataClassification,
+    isRegression,
     currentKind,
     canConfirmChannels,
     categoryOptions,
