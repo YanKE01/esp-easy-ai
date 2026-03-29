@@ -11,6 +11,8 @@ interface CategoryOption {
   previewFile?: DatasetFile
 }
 
+type ClassificationDatasetMode = 'pre-split' | 'raw-class-files' | 'invalid'
+
 const waveformPalette = ['#0f172a', '#0f766e', '#f59e0b', '#2563eb', '#e11d48', '#7c3aed']
 
 function getRelativeSegments(file?: DatasetFile) {
@@ -27,14 +29,99 @@ function getDatasetFileName(file: DatasetFile) {
   return segments[segments.length - 1] ?? file.name
 }
 
-function getCategoryKey(file: DatasetFile) {
-  const section = getDatasetSection(file)
-  const fileName = getDatasetFileName(file)
-  const baseName = fileName.replace(/\.[^.]+$/, '')
+function getCategoryBaseName(file: DatasetFile) {
+  return getDatasetFileName(file).replace(/\.[^.]+$/, '')
+}
 
-  if (section === 'train' && baseName.startsWith('train_')) return baseName.slice(6)
-  if (section === 'test' && baseName.startsWith('test_')) return baseName.slice(5)
+function getCategoryKey(file: DatasetFile, datasetMode: ClassificationDatasetMode) {
+  const baseName = getCategoryBaseName(file)
+
+  if (datasetMode === 'pre-split') {
+    const section = getDatasetSection(file)
+    if (section === 'train' && baseName.startsWith('train_')) return baseName.slice(6)
+    if (section === 'test' && baseName.startsWith('test_')) return baseName.slice(5)
+  }
+
   return baseName
+}
+
+function detectDatasetMode(files: DatasetFile[]) {
+  if (!files.length) {
+    return {
+      mode: 'invalid' as const,
+      error: 'Please upload at least one CSV file.',
+    }
+  }
+
+  const segmentsList = files.map((file) => getRelativeSegments(file))
+  const hasUnsupportedNesting = segmentsList.some((segments) => segments.length < 2 || segments.length > 3)
+
+  if (hasUnsupportedNesting) {
+    return {
+      mode: 'invalid' as const,
+      error:
+        'Unsupported folder depth. Use either dataset_root/train/*.csv and dataset_root/test/*.csv, or put class CSV files directly under the dataset root.',
+    }
+  }
+
+  const hasPreSplitFile = files.some((file) => {
+    const section = getDatasetSection(file)
+    return section === 'train' || section === 'test'
+  })
+  const hasRootClassFile = files.some((file) => getRelativeSegments(file).length === 2)
+
+  if (hasPreSplitFile && hasRootClassFile) {
+    return {
+      mode: 'invalid' as const,
+      error:
+        'Mixed dataset layouts are not supported. Use either train/test folders or class CSV files directly under the dataset root.',
+    }
+  }
+
+  if (hasPreSplitFile) {
+    const hasInvalidPreSplitFile = files.some((file) => {
+      const segments = getRelativeSegments(file)
+      return segments.length !== 3 || (segments[1] !== 'train' && segments[1] !== 'test')
+    })
+
+    if (hasInvalidPreSplitFile) {
+      return {
+        mode: 'invalid' as const,
+        error:
+          'Pre-split classification datasets must contain only train/*.csv and test/*.csv files under the dataset root.',
+      }
+    }
+
+    const hasTrainFile = files.some((file) => getDatasetSection(file) === 'train')
+    const hasTestFile = files.some((file) => getDatasetSection(file) === 'test')
+
+    if (!hasTrainFile || !hasTestFile) {
+      return {
+        mode: 'invalid' as const,
+        error: 'Pre-split classification datasets must include both train and test folders.',
+      }
+    }
+
+    return {
+      mode: 'pre-split' as const,
+      error: '',
+    }
+  }
+
+  const hasInvalidRootClassFile = files.some((file) => getRelativeSegments(file).length !== 2)
+
+  if (hasInvalidRootClassFile) {
+    return {
+      mode: 'invalid' as const,
+      error:
+        'Raw classification datasets must place class CSV files directly under the dataset root without extra subfolders.',
+    }
+  }
+
+  return {
+    mode: 'raw-class-files' as const,
+    error: '',
+  }
 }
 
 export const useDatasetClassificationStore = defineStore('dataset-classification', () => {
@@ -51,29 +138,71 @@ export const useDatasetClassificationStore = defineStore('dataset-classification
   const previewRowSource = ref('')
   const previewError = ref('')
   const isPreviewLoading = ref(false)
+  const datasetMode = ref<ClassificationDatasetMode>('invalid')
+  const datasetModeError = ref('')
 
   const canConfirmChannels = computed(() => Number(pendingNumberOfChannels.value) > 0)
 
   const categoryOptions = computed<CategoryOption[]>(() => {
     const categoryMap = new Map<string, CategoryOption>()
+
     uploadedDatasetFiles.value.forEach((file) => {
-      const section = getDatasetSection(file)
-      if (section !== 'train' && section !== 'test') return
-      const key = getCategoryKey(file)
-      const existing = categoryMap.get(key) ?? { key, label: key }
-      if (section === 'train') existing.trainFile = file
-      else existing.testFile = file
-      categoryMap.set(key, existing)
+      if (datasetMode.value === 'pre-split') {
+        const section = getDatasetSection(file)
+        if (section !== 'train' && section !== 'test') return
+
+        const key = getCategoryKey(file, datasetMode.value)
+        const existing = categoryMap.get(key) ?? { key, label: key }
+
+        if (section === 'train') existing.trainFile = file
+        else existing.testFile = file
+
+        categoryMap.set(key, existing)
+        return
+      }
+
+      if (datasetMode.value === 'raw-class-files') {
+        const key = getCategoryKey(file, datasetMode.value)
+        categoryMap.set(key, {
+          key,
+          label: key,
+          previewFile: file,
+          trainFile: file,
+        })
+      }
     })
 
     return Array.from(categoryMap.values())
       .sort((left, right) => left.label.localeCompare(right.label))
-      .map((option) => ({ ...option, previewFile: option.trainFile ?? option.testFile }))
+      .map((option) => ({
+        ...option,
+        previewFile: option.previewFile ?? option.trainFile ?? option.testFile,
+      }))
   })
 
   const configuredChannels = computed(() => {
     const parsed = Number(numberOfChannels.value)
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 0
+  })
+
+  const datasetSummary = computed(() => {
+    if (!uploadedDatasetFiles.value.length || datasetMode.value === 'invalid') {
+      return 'No valid dataset loaded yet.'
+    }
+
+    if (datasetMode.value === 'pre-split') {
+      return `Detected ${categoryOptions.value.length} categories from ${trainFileCount.value} train files and ${testFileCount.value} test files.`
+    }
+
+    return `Detected ${categoryOptions.value.length} categories from ${uploadedFileCount.value} root-level CSV files. Train/test split will be configured later in the Training stage.`
+  })
+
+  const isDatasetReady = computed(() => {
+    if (datasetMode.value === 'invalid' || datasetModeError.value) {
+      return false
+    }
+
+    return categoryOptions.value.length > 0 && configuredChannels.value > 0
   })
 
   const previewDataError = computed(() => {
@@ -111,6 +240,8 @@ export const useDatasetClassificationStore = defineStore('dataset-classification
     numberOfChannels.value = ''
     pendingNumberOfChannels.value = ''
     isChannelDialogOpen.value = false
+    datasetMode.value = 'invalid'
+    datasetModeError.value = ''
     resetPreviewState()
   }
 
@@ -120,14 +251,18 @@ export const useDatasetClassificationStore = defineStore('dataset-classification
       return
     }
 
+    const detectedMode = detectDatasetMode(files)
+
     uploadedDatasetFiles.value = files
     uploadedFolderName.value = getRelativeSegments(files[0])[0] ?? ''
     uploadedFileCount.value = files.length
+    datasetMode.value = detectedMode.mode
+    datasetModeError.value = detectedMode.error
     trainFileCount.value = files.filter((file) => getDatasetSection(file) === 'train').length
     testFileCount.value = files.filter((file) => getDatasetSection(file) === 'test').length
     resetPreviewState()
     pendingNumberOfChannels.value = numberOfChannels.value
-    isChannelDialogOpen.value = true
+    isChannelDialogOpen.value = !detectedMode.error
   }
 
   async function loadPreviewRow() {
@@ -192,8 +327,13 @@ export const useDatasetClassificationStore = defineStore('dataset-classification
     previewRowSource,
     previewError,
     isPreviewLoading,
+    datasetMode,
+    datasetModeError,
     canConfirmChannels,
     categoryOptions,
+    configuredChannels,
+    datasetSummary,
+    isDatasetReady,
     previewDataError,
     waveformChannels,
     handleFileSelection,

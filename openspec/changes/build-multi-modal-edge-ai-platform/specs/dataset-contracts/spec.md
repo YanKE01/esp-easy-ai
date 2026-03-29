@@ -7,6 +7,10 @@
 - **WHEN** 用户为 `1D Data Classification` 上传包含 `train/` 和 `test/` 目录的数据集文件夹
 - **THEN** 系统接受该数据集并进入元数据采集流程
 
+#### Scenario: 1D 数据分类原始类别文件上传成功
+- **WHEN** 用户为 `1D Data Classification` 上传根目录下直接包含多个类别 CSV 文件的数据集文件夹
+- **THEN** 系统将每个 CSV 识别为一个类别来源，并保留到后续训练阶段再配置训练集与测试集切分
+
 #### Scenario: 缺少必需的数据结构
 - **WHEN** 用户上传的数据集不满足所选任务要求的目录或文件结构
 - **THEN** 系统拒绝该数据集并明确指出失败的结构规则
@@ -18,6 +22,10 @@
 - **WHEN** 用户上传 `1D Data Classification` 数据集
 - **THEN** 系统在进入预览和训练配置之前提示用户填写 `Number of Channels`
 
+#### Scenario: 分类原始类别文件在训练阶段需要切分配置
+- **WHEN** 用户上传未预先分割的 `1D Data Classification` 原始类别文件数据集
+- **THEN** 系统允许该数据集继续完成 Dataset 阶段的元数据采集与预览，并在 Training 阶段要求用户补充切分配置
+
 #### Scenario: 时序任务需要列映射
 - **WHEN** 用户上传时序 CSV 数据集
 - **THEN** 系统要求用户定义时间列、信号列、标签列以及可选的 `series_id` 映射，随后才可将数据集视为可用
@@ -28,6 +36,10 @@
 #### Scenario: 1D 样本波形预览
 - **WHEN** 用户在 `1D Data Classification` 数据集中选择某个类别
 - **THEN** 系统基于已配置的通道解释展示至少一个样本预览
+
+#### Scenario: 原始类别文件数据集摘要
+- **WHEN** 用户上传根目录类别文件形式的 `1D Data Classification` 数据集
+- **THEN** 系统展示识别出的类别数量、文件数量以及该数据集将在 Training 阶段完成切分
 
 #### Scenario: 图像任务预览
 - **WHEN** 用户上传图像数据集

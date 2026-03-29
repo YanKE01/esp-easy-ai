@@ -9,6 +9,7 @@ import UploadDropzone from '../../components/UploadDropzone.vue'
 import WaveformPreviewChart from '../../components/WaveformPreviewChart.vue'
 import { useDatasetClassificationStore, type DatasetFile } from '../../stores/datasetClassification'
 import { useDatasetRegressionStore } from '../../stores/datasetRegression'
+import { useOneDWorkflowStore } from '../../stores/oneDWorkflow'
 
 const datasetKinds = [
   {
@@ -23,7 +24,13 @@ const datasetKinds = [
   },
 ] as const
 
-const activeKind = ref<(typeof datasetKinds)[number]['id']>('data-classification')
+const workflowStore = useOneDWorkflowStore()
+const activeKind = computed({
+  get: () => workflowStore.activeKind,
+  set: (value: (typeof datasetKinds)[number]['id']) => {
+    workflowStore.setActiveKind(value)
+  },
+})
 const classificationStore = useDatasetClassificationStore()
 const regressionStore = useDatasetRegressionStore()
 
@@ -35,6 +42,25 @@ const uploadedFolderName = computed(() =>
     ? classificationState.uploadedFolderName.value
     : regressionState.uploadedFolderName.value,
 )
+const uploadedFileCount = computed(() =>
+  activeKind.value === 'data-classification'
+    ? classificationState.uploadedFileCount.value
+    : regressionState.uploadedFileCount.value,
+)
+const trainFileCount = computed(() =>
+  activeKind.value === 'data-classification'
+    ? classificationState.trainFileCount.value
+    : regressionState.trainFileCount.value,
+)
+const testFileCount = computed(() =>
+  activeKind.value === 'data-classification'
+    ? classificationState.testFileCount.value
+    : regressionState.testFileCount.value,
+)
+const classificationDatasetMode = computed(() => classificationState.datasetMode.value)
+const classificationDatasetModeError = computed(() => classificationState.datasetModeError.value)
+const classificationDatasetSummary = computed(() => classificationState.datasetSummary.value)
+const classificationDatasetReady = computed(() => classificationState.isDatasetReady.value)
 const numberOfChannels = computed(() =>
   activeKind.value === 'data-classification'
     ? classificationState.numberOfChannels.value
@@ -128,7 +154,7 @@ const waveformChannels = computed(() =>
 )
 
 function handleKindChange(kindId: (typeof datasetKinds)[number]['id']) {
-  activeKind.value = kindId
+  workflowStore.setActiveKind(kindId)
 }
 
 function handleFileChange(event: Event) {
@@ -233,28 +259,27 @@ const uploadInputId = 'dataset-upload'
       </SectionCard>
 
       <SectionCard class="h-full">
-        <div class="mb-2 flex items-center justify-between gap-3">
-          <p class="m-0 text-xs font-bold uppercase tracking-[0.08em] text-[#5e7498]">Upload Folder</p>
-          <button
-            v-if="uploadedFolderName"
-            type="button"
-            class="rounded-lg border border-[#f1b4bc] bg-[#fff4f6] px-3 py-1.5 text-xs font-semibold text-[#c24157] transition hover:border-[#dc5168] hover:bg-[#ffe8ec] hover:text-[#a61e36]"
-            @click="handleRemoveUpload"
-          >
-            Remove
-          </button>
-        </div>
-        <div class="flex h-full flex-col">
+        <div class="flex h-full min-h-[244px] flex-col">
+          <div class="mb-2 flex min-h-[32px] items-center justify-between gap-3">
+            <p class="m-0 text-xs font-bold uppercase tracking-[0.08em] text-[#5e7498]">Upload Folder</p>
+            <button
+              type="button"
+              class="rounded-lg border border-[#f1b4bc] bg-[#fff4f6] px-3 py-1.5 text-xs font-semibold text-[#c24157] transition hover:border-[#dc5168] hover:bg-[#ffe8ec] hover:text-[#a61e36]"
+              :class="uploadedFolderName ? 'visible' : 'invisible pointer-events-none'"
+              @click="handleRemoveUpload"
+            >
+              Remove
+            </button>
+          </div>
           <h3 class="m-0 min-h-[68px] text-[28px] font-bold leading-[1.2] text-[#0d234a]">Upload Dataset Folder</h3>
           <p class="mt-3 min-h-[52px] text-[15px] leading-[1.7] text-[#475a77]">
             {{ activeKind === 'data-classification'
-              ? 'Upload the dataset root folder for 1D data classification.'
+              ? 'Upload either a dataset root with train/test folders, or a root folder that contains one CSV per class. If the dataset is not pre-split, configure train/test later in the Training stage.'
               : 'Upload the dataset root folder for 1D regression.' }}
           </p>
 
           <UploadDropzone :input-id="uploadInputId" label="Choose Dataset Folder" :text="uploadedFolderName || 'Click to select a dataset root folder.'" />
           <input :id="uploadInputId" class="sr-only" type="file" accept=".csv,text/csv" multiple webkitdirectory directory @change="handleFileChange" />
-
         </div>
       </SectionCard>
     </div>
@@ -275,12 +300,51 @@ const uploadInputId = 'dataset-upload'
         <div class="flex flex-wrap gap-2.5">
           <StatusBadge>Type: {{ activeKind === 'data-classification' ? 'Data Classification' : 'Regression' }}</StatusBadge>
           <StatusBadge>Channels: {{ numberOfChannels || 'Pending' }}</StatusBadge>
+          <StatusBadge
+            v-if="activeKind === 'data-classification' && uploadedFolderName"
+            tone="muted"
+          >
+            Files: {{ uploadedFileCount }}
+          </StatusBadge>
+          <StatusBadge
+            v-if="activeKind === 'data-classification' && classificationDatasetMode === 'pre-split'"
+            tone="muted"
+          >
+            Mode: Provided train/test
+          </StatusBadge>
+          <StatusBadge
+            v-else-if="activeKind === 'data-classification' && classificationDatasetMode === 'raw-class-files'"
+            tone="muted"
+          >
+            Mode: Raw class files
+          </StatusBadge>
+          <StatusBadge
+            v-if="activeKind === 'data-classification' && classificationDatasetMode === 'pre-split'"
+            tone="muted"
+          >
+            Train/Test Files: {{ trainFileCount }}/{{ testFileCount }}
+          </StatusBadge>
+          <StatusBadge
+            v-if="activeKind === 'data-classification' && classificationDatasetReady"
+            tone="muted"
+          >
+            Dataset: Ready
+          </StatusBadge>
         </div>
       </div>
 
       <div class="mt-5 rounded-[20px] border border-[#d6dfef] bg-white p-4 md:p-5">
+        <div
+          v-if="activeKind === 'data-classification' && uploadedFolderName"
+          class="rounded-[16px] border border-[#d6dfef] bg-[#f7f9fc] p-4"
+        >
+          <p class="m-0 text-sm leading-[1.7] text-[#58708f]">
+            {{ classificationDatasetModeError || classificationDatasetSummary }}
+          </p>
+        </div>
+
         <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <FieldControl :label="activeKind === 'data-classification' ? 'Category' : 'Dataset Split'" class="max-w-xs">
+          <FieldControl :label="activeKind === 'data-classification' ? 'Category' : 'Dataset Split'" class="max-w-xs" :class="activeKind === 'data-classification' && uploadedFolderName ? 'mt-5' : ''">
             <select :value="previewSelection" class="h-[42px] w-full rounded-xl border border-[#c9d7ea] bg-white px-3.5 text-sm text-[#18325c] outline-none transition focus:border-[#0d234a] focus:shadow-[0_0_0_3px_rgba(13,35,74,0.08)]" @change="handlePreviewSelectionChange(($event.target as HTMLSelectElement).value)">
               <option value="" disabled>{{ activeKind === 'data-classification' ? 'Select category' : 'Select sample group' }}</option>
               <option v-for="option in previewOptions" :key="option.key" :value="option.key">{{ option.label }}</option>
