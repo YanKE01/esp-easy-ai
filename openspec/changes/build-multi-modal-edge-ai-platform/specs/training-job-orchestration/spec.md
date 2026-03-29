@@ -7,6 +7,26 @@
 - **WHEN** 用户启动 1D 任务训练
 - **THEN** 前端发送的请求对象中包含任务标识、数据集信息、模型预设信息和训练参数
 
+#### Scenario: 分类原始类别文件在训练启动前补充 split
+- **WHEN** 用户为 `1D Data Classification` 的原始类别文件数据集点击 `Train`
+- **THEN** 前端先弹出 split 配置，待用户确认后再组装训练请求
+
+#### Scenario: 分类 MLP 允许编辑 hidden dense layers
+- **WHEN** 用户在 `1D Data Classification` 训练页选择 `MLP`
+- **THEN** 前端允许用户调整 hidden dense layers 的神经元数量，并在倒数第二层提供追加 dense layer 的入口
+
+#### Scenario: 分类训练页展示输出层类别数
+- **WHEN** 用户在 `1D Data Classification` 训练页查看 `MLP Structure`
+- **THEN** 前端展示 `Output Layer`，并直接使用 `Dataset` 阶段识别到的类别数量作为输出类别数
+
+#### Scenario: 分类训练页选择输入归一化策略
+- **WHEN** 用户在 `1D Data Classification` 的 `Training Parameters` 中设置 `Input Normalization`
+- **THEN** 前端允许用户在 `None`、`Z-Score`、`Min-Max` 中选择，并将该值作为训练数据预处理策略传递给后端
+
+#### Scenario: Z-Score 归一化公式固定
+- **WHEN** 用户选择 `Z-Score` 作为输入归一化策略
+- **THEN** 平台按 `x' = (x - mean) / std` 解释该策略，并要求训练与推理阶段复用相同的训练集统计量
+
 #### Scenario: 前端提交图像训练请求
 - **WHEN** 用户启动图像任务训练
 - **THEN** 前端使用相同逻辑结构发送请求，并填充图像任务对应的数据集与模型字段

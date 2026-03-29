@@ -92,6 +92,14 @@ export const useDatasetRegressionStore = defineStore('dataset-regression', () =>
     return `${configuredTargetColumnStart.value}-${configuredTargetColumnEnd.value}`
   })
 
+  const isDatasetReady = computed(() => {
+    if (!uploadedDatasetFiles.value.length) return false
+    if (!trainFileCount.value || !testFileCount.value) return false
+    if (!configuredChannels.value) return false
+    if (!configuredTargetColumnStart.value || !configuredTargetColumnEnd.value) return false
+    return configuredTargetColumnStart.value <= configuredTargetColumnEnd.value
+  })
+
   const previewDataError = computed(() => {
     if (!previewRowValues.value.length || !configuredChannels.value) return ''
     if (previewRowValues.value.length % configuredChannels.value !== 0) {
@@ -253,6 +261,7 @@ export const useDatasetRegressionStore = defineStore('dataset-regression', () =>
     previewOptions,
     previewDataError,
     targetColumnSummary,
+    isDatasetReady,
     waveformChannels,
     handleFileSelection,
     setPreviewSplit,
