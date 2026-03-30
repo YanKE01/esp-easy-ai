@@ -14,7 +14,8 @@
 - [x] 2.5 按“页面共用、逻辑分开”的原则拆分 `1D Data Classification` 与 `1D Regression` 的前端处理逻辑，并在变更后等待人工确认
 - [x] 2.6 细化 `1D Regression -> Dataset` 的上传、预览与目标列配置，支持按列范围配置 target，并兼容特征向量式回归预览
 - [ ] 2.7 定义一维任务共享的前端状态对象，覆盖数据集就绪状态、训练配置和结果展示，并在变更后等待人工确认
-- [ ] 2.8 根据人工反馈逐步补齐 `Training` 与 `Emulation` 页面的前端细节，不进行未经确认的大改动；其中分类训练页首版支持默认 `MLP`、可编辑 dense layers、输出层类别数展示、输入归一化下拉、训练启动前的条件 split 弹窗，以及 `Dataset -> Training -> Emulation` 的阶段锁定导航
+- [x] 2.8 根据人工反馈完成 `Dataset` 与 `Training` 页面的第一阶段前端细化，不进行未经确认的大改动；其中分类训练页已支持默认 `MLP`、可编辑 dense layers、可基于 preset 顺序扩展的 `1D CNN`、输出层类别数展示、输入归一化下拉、训练启动前的条件 split 弹窗，以及 `Dataset -> Training -> Emulation` 的阶段锁定导航；数据集页已修正上传后取消特征配置再重复上传同一数据集时的对话框重开问题
+- [ ] 2.9 根据人工反馈继续补齐 `Emulation` 页面的前端细节，并在展示结构确认前保持当前占位状态
 
 ## 3. 一维数据集契约
 
@@ -26,11 +27,12 @@
 
 ## 4. 一维后端实现
 
-- [ ] 4.1 在收到人工明确的“开始后端”指令后，创建一维任务统一的 Python 请求结构
-- [ ] 4.2 在收到人工确认后，为 `1D Data Classification` 与 `1D Regression` 增加训练 API 路由与统一响应结构
-- [ ] 4.3 优先打通 `1D Data Classification` 的首条端到端训练链路，并在完成后等待人工反馈
-- [ ] 4.4 在相同输入骨架上补充 `1D Regression` 的首条端到端训练链路，并在完成后等待人工反馈
-- [ ] 4.5 记录独立时序任务的后端设计占位，但第一阶段不进入实现
+- [ ] 4.1 在 `FastAPI` 中创建一维任务统一的 Python 请求结构，覆盖 `dataset`、`model`、`training` 三段，并为 `1D CNN` 采用顺序 `layers[]` 配置
+- [ ] 4.2 增加 `/api/train` 流式训练接口，以同步训练方式向前端返回日志与最终结果
+- [ ] 4.3 按 `api/`、`training/dispatcher.py`、`training/one_d/common/`、`training/one_d/data_classification/` 与 `training/one_d/regression/` 的边界拆分后端文件
+- [ ] 4.4 优先打通 `1D Data Classification` 的首条端到端训练链路，并在完成后等待人工反馈
+- [ ] 4.5 在相同输入骨架上补充 `1D Regression` 的首条端到端训练链路，并在完成后等待人工反馈
+- [ ] 4.6 记录独立时序任务的后端设计占位，但第一阶段不进入实现
 
 ## 5. 一维产物封装
 
