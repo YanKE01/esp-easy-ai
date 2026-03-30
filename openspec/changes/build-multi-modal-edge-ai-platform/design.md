@@ -129,6 +129,10 @@
 - 若当前分类数据集属于根目录类别 CSV 的原始模式，则在用户点击 `Train` 时弹出 split 配置，而不是在训练页常驻展示切分表单。
 - `MLP` 作为分类任务首版默认模型，并允许用户在训练页中编辑 hidden dense layers：可修改每层神经元数，并在倒数第二层通过虚线引导位追加新的 dense layer。
 - `MLP Structure` 中必须显式展示 `Output Layer`，其类别数直接复用 `Dataset` 阶段识别到的分类数量，而不是要求用户在训练页重复输入。
+- `1D CNN` 作为分类任务的可选模型，首版采用“带 preset 的顺序层栈编辑”方式展示：默认包含两个 `Conv1D + MaxPooling1D` 的 `CNN Block`，以及 `GlobalAveragePooling1D -> Dense(32, relu) -> Dropout(0.2)` 的分类头；除 `Output Layer` 外，预设层均允许删除。
+- 每个 `CNN Block` 的交互方式与 `MLP` 的 dense layer 一致：点击模块卡片后通过弹窗编辑参数。首版开放 `filters`、`kernel size` 与 `pool size` 三个参数；`padding='same'` 与 `activation='relu'` 固定，不在训练页中开放编辑。
+- `1D CNN` 的 `Network Extension` 入口位于 `Output Layer` 上方，允许用户继续在当前层栈末尾追加 `CNN Block`、`Dense` 与 `Dropout` 层，以基于预设继续搭建自定义结构。
+- `1D CNN` 的输入通道数直接复用 `Dataset` 阶段确认的 channel 数，输出类别数直接复用 `Dataset` 阶段识别到的分类数量；`Output Layer` 固定存在，不允许删除。
 
 这样做的原因是训练页需要保持主流程清晰，避免长期占据页面空间的条件配置，同时又要让默认模型具备足够的可调节性，以适配一维向量型分类任务的真实需求。
 
@@ -155,6 +159,18 @@
 ```
 
 实现上可以是单路由分发，也可以是多个任务路由，但服务内部必须共享同一套请求/响应对象。
+
+第一阶段后端采用 `FastAPI` 落地训练接口，并优先提供单个 `/api/train` 入口。该入口首版不引入异步任务队列，而是以同步训练方式执行当前请求；训练进行期间通过流式日志持续向前端返回状态，训练结束后在同一条响应流中返回最终结果或错误信息。
+
+后端代码组织上从第一版开始按 `1d` 任务边界拆分文件，而不是先堆叠在单个训练脚本中。建议至少拆为：
+
+- `api/`：`FastAPI` 应用、路由、请求响应 schema
+- `training/dispatcher.py`：按 `task_type` 路由训练实现
+- `training/one_d/common/`：归一化、产物打包、公共工具
+- `training/one_d/data_classification/`：数据集读取、模型构建、训练循环、指标
+- `training/one_d/regression/`：先预留目录，待分类链路稳定后补齐
+
+其中 `1D Data Classification` 的 `1D CNN` 后端构建不再假设固定 head，而是按前端传入的顺序 `layers[]` 解释允许的层类型；`Output Layer` 仍由后端按类别数自动补齐。
 
 原因是这能让前端表单状态和后端处理链路保持一致，也便于后续加入训练历史、队列和日志能力。
 
@@ -190,8 +206,8 @@
 2. 先补齐规格文档与任务拆解，再按规格对前端页面结构和状态模型做小步调整。
 3. 若前端调整涉及明显的信息架构、导航或交互路径变化，先提交人工确认，再继续落地。
 4. 在未收到“开始后端”指令前，仅保留 Python 端契约和接口设计，不进入后端代码编写。
-5. 收到明确指令后，再建立统一训练请求对象和占位接口，优先跑通 `1D Data Classification`。
-6. 在相同数据骨架上补充 `1D Regression` 的任务配置、训练指标和结果展示。
+5. 收到明确指令后，先用 `FastAPI` 建立统一训练请求 schema 与 `/api/train` 流式接口，优先跑通 `1D Data Classification`。
+6. 在 `1D Data Classification` 首条链路中先完成同步训练、流式日志返回、最小模型包导出，再补充 `1D Regression` 的任务配置、训练指标和结果展示。
 7. 完成统一产物清单格式，确保首个任务训练后即可导出基础模型包。
 8. 在 `1D Data Classification` 与 `1D Regression` 稳定后，再与人工共同决定是否恢复独立的 `1D Time Series Classification`。
 9. 以同一骨架继续扩展 `Image Classification`、`Image Object Detection`。
@@ -205,5 +221,4 @@
 
 - `1D Data Classification` 是否长期视为独立任务，还是后续并入更广义的 `Tabular` 能力。
 - 图像目标检测首版采用何种标注格式作为平台标准，例如 YOLO TXT 还是 COCO JSON。
-- 训练任务执行是同步阻塞返回，还是从第一版开始就采用异步任务和轮询状态。
 - 首版模型导出优先面向哪类 ESP32 推理链路，以便确定模型包中的额外转换产物。

@@ -7,6 +7,14 @@
 - **WHEN** 用户启动 1D 任务训练
 - **THEN** 前端发送的请求对象中包含任务标识、数据集信息、模型预设信息和训练参数
 
+#### Scenario: 首版训练接口同步执行并返回流式日志
+- **WHEN** 用户启动第一阶段的 `1D` 训练任务
+- **THEN** 后端使用同步方式执行本次训练请求，并在训练过程中持续向前端返回流式日志，训练结束后在同一响应流中返回成功结果或错误信息
+
+#### Scenario: 1D 后端按任务边界拆分模块
+- **WHEN** 平台开始实现第一阶段的 `1D` 训练后端
+- **THEN** 后端至少按 `api/`、`training/dispatcher.py`、`training/one_d/common/`、`training/one_d/data_classification/` 与 `training/one_d/regression/` 的边界拆分文件，而不是集中在单个训练脚本中
+
 #### Scenario: 分类原始类别文件在训练启动前补充 split
 - **WHEN** 用户为 `1D Data Classification` 的原始类别文件数据集点击 `Train`
 - **THEN** 前端先弹出 split 配置，待用户确认后再组装训练请求
@@ -18,6 +26,38 @@
 #### Scenario: 分类训练页展示输出层类别数
 - **WHEN** 用户在 `1D Data Classification` 训练页查看 `MLP Structure`
 - **THEN** 前端展示 `Output Layer`，并直接使用 `Dataset` 阶段识别到的类别数量作为输出类别数
+
+#### Scenario: 分类 1D CNN 展示默认 CNN Block 结构
+- **WHEN** 用户在 `1D Data Classification` 训练页选择 `1D CNN`
+- **THEN** 前端展示默认的两个 `CNN Block`，每个 block 由一个 `Conv1D` 和一个 `MaxPooling1D` 组成，并在其后展示预设的 `GlobalAveragePooling1D -> Dense(32) -> Dropout(0.2) -> Output Layer`
+
+#### Scenario: 分类 1D CNN 允许编辑 block 参数
+- **WHEN** 用户在 `1D Data Classification` 训练页点击某个 `CNN Block`
+- **THEN** 前端通过弹窗允许用户编辑该 block 的 `filters`、`kernel size` 与 `pool size`
+
+#### Scenario: 分类 1D CNN 允许增删 CNN Block
+- **WHEN** 用户在 `1D Data Classification` 训练页编辑 `1D CNN` 结构
+- **THEN** 前端允许用户在 `Output Layer` 上方追加新的 `CNN Block`，并允许删除可删除的预设或自定义 `CNN Block`
+
+#### Scenario: 分类 1D CNN 允许扩展 Dense 与 Dropout
+- **WHEN** 用户在 `1D Data Classification` 训练页编辑 `1D CNN` 结构
+- **THEN** 前端允许用户在 `Output Layer` 上方追加 `Dense` 与 `Dropout` 层，以继续扩展当前的 `1D CNN` 层栈
+
+#### Scenario: 分类 1D CNN 预设层允许删除
+- **WHEN** 用户在 `1D Data Classification` 训练页查看 `1D CNN` 的默认预设结构
+- **THEN** 前端允许用户删除 `Output Layer` 之外的预设层，以基于预设重新搭建自定义结构
+
+#### Scenario: 分类 1D CNN 固定 block 其余参数
+- **WHEN** 用户在 `1D Data Classification` 训练页配置 `1D CNN`
+- **THEN** 前端固定每个 `CNN Block` 的 `padding='same'` 与 `activation='relu'`，不在训练页中开放这些参数
+
+#### Scenario: 分类 1D CNN 复用数据集输入与输出元数据
+- **WHEN** 用户在 `1D Data Classification` 训练页查看 `1D CNN` 结构
+- **THEN** 前端直接复用 `Dataset` 阶段确认的输入 channel 数作为模型输入通道数，并直接复用 `Dataset` 阶段识别到的类别数量作为输出类别数
+
+#### Scenario: 分类 1D CNN 后端按顺序层栈构建模型
+- **WHEN** 后端接收到 `1D Data Classification` 的 `1D CNN` 训练请求
+- **THEN** 后端按前端传入的顺序 `layers[]` 解释允许的层类型来构建网络，并根据类别数自动补齐最终输出层
 
 #### Scenario: 分类训练页选择输入归一化策略
 - **WHEN** 用户在 `1D Data Classification` 的 `Training Parameters` 中设置 `Input Normalization`

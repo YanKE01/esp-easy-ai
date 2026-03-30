@@ -166,6 +166,8 @@ function handleFileChange(event: Event) {
   } else {
     regressionStore.handleFileSelection(files)
   }
+
+  target.value = ''
 }
 
 function handlePreviewSelectionChange(value: string) {

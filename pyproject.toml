@@ -3,5 +3,7 @@ name = "esp-easy-ai"
 version = "0.1.0"
 description = "ESP32 edge AI training platform for 1D and image tasks"
 readme = "README.md"
-requires-python = ">=3.13"
-dependencies = []
+requires-python = ">=3.8,<3.9"
+dependencies = [
+    "torch==2.2.0",
+]

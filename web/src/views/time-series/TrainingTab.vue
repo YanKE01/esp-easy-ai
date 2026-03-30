@@ -190,6 +190,118 @@ function handleTrainClick() {
           </div>
         </div>
 
+        <div
+          v-else
+          class="mt-5 rounded-[20px] border border-[#d6dfef] bg-[#fbfcfe] p-5"
+        >
+          <div class="mb-4 flex items-center justify-between gap-3">
+            <div>
+              <p class="m-0 text-xs font-bold uppercase tracking-[0.08em] text-[#5e7498]">1D CNN Structure</p>
+              <h3 class="m-0 mt-2 text-[22px] font-bold leading-[1.2] text-[#0d234a]">Editable Sequential Layers</h3>
+            </div>
+            <div class="flex items-center gap-3">
+              <StatusBadge tone="muted">Output: {{ classificationCategoryCount }} Classes</StatusBadge>
+              <button
+                type="button"
+                class="rounded-xl border border-[#c9d7ea] px-3 py-2 text-xs font-semibold text-[#324869] transition hover:border-[#0d234a] hover:text-[#0d234a]"
+                @click="classificationTrainingStore.restoreCnnPreset"
+              >
+                Restore Preset
+              </button>
+            </div>
+          </div>
+
+          <div class="flex flex-col gap-3">
+            <div class="rounded-[18px] border border-[#d6dfef] bg-white px-4 py-4">
+              <p class="m-0 text-center text-sm font-semibold text-[#18325c]">
+                Input Layer ({{ classificationStore.numberOfChannels || '0' }} channels)
+              </p>
+            </div>
+
+            <div
+              v-for="(layer, index) in classificationTrainingStore.cnnLayers"
+              :key="layer.id"
+              class="relative rounded-[18px] bg-white px-4 py-4"
+              :class="layer.removable ? 'border border-dashed border-[#7b93b6]' : 'border border-[#d6dfef]'"
+            >
+              <button
+                v-if="layer.type === 'cnn-block'"
+                type="button"
+                class="flex w-full items-center justify-center rounded-xl px-10 py-2 text-center text-sm font-semibold text-[#18325c] transition hover:bg-[#f7f9fc]"
+                @click="classificationTrainingStore.openCnnBlockDialog(layer.id)"
+              >
+                CNN Block {{ index + 1 }} ({{ layer.filters || '0' }} filters, kernel {{ layer.kernelSize || '0' }}, pool {{ layer.poolSize || '0' }})
+              </button>
+              <button
+                v-else-if="layer.type === 'dense'"
+                type="button"
+                class="flex w-full items-center justify-center rounded-xl px-10 py-2 text-center text-sm font-semibold text-[#18325c] transition hover:bg-[#f7f9fc]"
+                @click="classificationTrainingStore.openCnnDenseDialog(layer.id)"
+              >
+                Dense Layer ({{ layer.units || '0' }} neurons)
+              </button>
+              <button
+                v-else-if="layer.type === 'dropout'"
+                type="button"
+                class="flex w-full items-center justify-center rounded-xl px-10 py-2 text-center text-sm font-semibold text-[#18325c] transition hover:bg-[#f7f9fc]"
+                @click="classificationTrainingStore.openCnnDropoutDialog(layer.id)"
+              >
+                Dropout Layer (rate {{ layer.rate || '0' }})
+              </button>
+              <p
+                v-else
+                class="m-0 text-center text-sm font-semibold text-[#18325c]"
+              >
+                GlobalAveragePooling1D
+              </p>
+              <button
+                v-if="layer.removable"
+                type="button"
+                class="absolute right-3 top-3 rounded-lg border border-[#f1b4bc] bg-[#fff4f6] px-3 py-1.5 text-xs font-semibold text-[#c24157] transition hover:border-[#dc5168] hover:bg-[#ffe8ec]"
+                @click="classificationTrainingStore.removeCnnLayer(layer.id)"
+              >
+                Remove
+              </button>
+            </div>
+
+            <div class="rounded-[18px] border border-dashed border-[#7b93b6] bg-[#f7f9fc] px-4 py-5 text-center">
+              <p class="m-0 text-xs font-bold uppercase tracking-[0.08em] text-[#5e7498]">Network Extension</p>
+              <div class="mt-4 grid gap-3 md:grid-cols-3">
+                <button
+                  type="button"
+                  class="rounded-xl border border-dashed border-[#7b93b6] bg-white px-4 py-3 text-sm font-semibold text-[#18325c] transition hover:border-[#0d234a] hover:bg-[#eef3fb]"
+                  @click="classificationTrainingStore.addCnnBlock"
+                >
+                  Add CNN Block
+                </button>
+                <button
+                  type="button"
+                  class="rounded-xl border border-dashed border-[#7b93b6] bg-white px-4 py-3 text-sm font-semibold text-[#18325c] transition hover:border-[#0d234a] hover:bg-[#eef3fb]"
+                  @click="classificationTrainingStore.addCnnDenseLayer"
+                >
+                  Add Dense
+                </button>
+                <button
+                  type="button"
+                  class="rounded-xl border border-dashed border-[#7b93b6] bg-white px-4 py-3 text-sm font-semibold text-[#18325c] transition hover:border-[#0d234a] hover:bg-[#eef3fb]"
+                  @click="classificationTrainingStore.addCnnDropoutLayer"
+                >
+                  Add Dropout
+                </button>
+              </div>
+              <p class="mb-0 mt-3 text-sm leading-[1.7] text-[#58708f]">
+                Append new layers above the fixed output layer.
+              </p>
+            </div>
+
+            <div class="rounded-[18px] border border-[#d6dfef] bg-white px-4 py-4">
+              <p class="m-0 text-center text-sm font-semibold text-[#18325c]">
+                Output Layer ({{ classificationCategoryCount }} classes)
+              </p>
+            </div>
+          </div>
+        </div>
+
         <div class="mt-6 flex justify-center">
           <button
             type="button"
@@ -307,6 +419,119 @@ function handleTrainClick() {
           type="button"
           class="rounded-xl bg-[#0d234a] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#132f63]"
           @click="classificationTrainingStore.confirmLayerDialog"
+        >
+          Confirm
+        </button>
+      </div>
+    </DialogModal>
+
+    <DialogModal :open="classificationTrainingStore.isCnnBlockDialogOpen" @close="classificationTrainingStore.closeCnnBlockDialog">
+      <p class="m-0 mb-2 text-xs font-bold uppercase tracking-[0.08em] text-[#5e7498]">CNN Block</p>
+      <h3 class="m-0 text-[24px] font-bold leading-[1.2] text-[#0d234a]">Edit Block Parameters</h3>
+
+      <div class="mt-6 grid gap-4 md:grid-cols-3">
+        <FieldControl label="Filters">
+          <input
+            v-model="classificationTrainingStore.editingCnnFilters"
+            class="h-[42px] w-full rounded-xl border border-[#c9d7ea] bg-white px-3.5 text-sm text-[#18325c] outline-none transition focus:border-[#0d234a] focus:shadow-[0_0_0_3px_rgba(13,35,74,0.08)]"
+            type="number"
+            min="1"
+          />
+        </FieldControl>
+        <FieldControl label="Kernel Size">
+          <input
+            v-model="classificationTrainingStore.editingCnnKernelSize"
+            class="h-[42px] w-full rounded-xl border border-[#c9d7ea] bg-white px-3.5 text-sm text-[#18325c] outline-none transition focus:border-[#0d234a] focus:shadow-[0_0_0_3px_rgba(13,35,74,0.08)]"
+            type="number"
+            min="1"
+          />
+        </FieldControl>
+        <FieldControl label="Pool Size">
+          <input
+            v-model="classificationTrainingStore.editingCnnPoolSize"
+            class="h-[42px] w-full rounded-xl border border-[#c9d7ea] bg-white px-3.5 text-sm text-[#18325c] outline-none transition focus:border-[#0d234a] focus:shadow-[0_0_0_3px_rgba(13,35,74,0.08)]"
+            type="number"
+            min="1"
+          />
+        </FieldControl>
+      </div>
+
+      <div class="mt-6 flex justify-end gap-3">
+        <button
+          type="button"
+          class="rounded-xl border border-[#c9d7ea] px-4 py-2.5 text-sm font-semibold text-[#324869] transition hover:border-[#0d234a]"
+          @click="classificationTrainingStore.closeCnnBlockDialog"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          class="rounded-xl bg-[#0d234a] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#132f63]"
+          @click="classificationTrainingStore.confirmCnnBlockDialog"
+        >
+          Confirm
+        </button>
+      </div>
+    </DialogModal>
+
+    <DialogModal :open="classificationTrainingStore.isCnnDenseDialogOpen" @close="classificationTrainingStore.closeCnnDenseDialog">
+      <p class="m-0 mb-2 text-xs font-bold uppercase tracking-[0.08em] text-[#5e7498]">CNN Dense Layer</p>
+      <h3 class="m-0 text-[24px] font-bold leading-[1.2] text-[#0d234a]">Edit Dense Layer</h3>
+
+      <FieldControl label="Neuron Count" class="mt-6">
+        <input
+          v-model="classificationTrainingStore.editingCnnDenseUnits"
+          class="h-[42px] w-full rounded-xl border border-[#c9d7ea] bg-white px-3.5 text-sm text-[#18325c] outline-none transition focus:border-[#0d234a] focus:shadow-[0_0_0_3px_rgba(13,35,74,0.08)]"
+          type="number"
+          min="1"
+        />
+      </FieldControl>
+
+      <div class="mt-6 flex justify-end gap-3">
+        <button
+          type="button"
+          class="rounded-xl border border-[#c9d7ea] px-4 py-2.5 text-sm font-semibold text-[#324869] transition hover:border-[#0d234a]"
+          @click="classificationTrainingStore.closeCnnDenseDialog"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          class="rounded-xl bg-[#0d234a] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#132f63]"
+          @click="classificationTrainingStore.confirmCnnDenseDialog"
+        >
+          Confirm
+        </button>
+      </div>
+    </DialogModal>
+
+    <DialogModal :open="classificationTrainingStore.isCnnDropoutDialogOpen" @close="classificationTrainingStore.closeCnnDropoutDialog">
+      <p class="m-0 mb-2 text-xs font-bold uppercase tracking-[0.08em] text-[#5e7498]">CNN Dropout Layer</p>
+      <h3 class="m-0 text-[24px] font-bold leading-[1.2] text-[#0d234a]">Edit Dropout Layer</h3>
+
+      <FieldControl label="Dropout Rate" class="mt-6">
+        <input
+          v-model="classificationTrainingStore.editingCnnDropoutRate"
+          class="h-[42px] w-full rounded-xl border border-[#c9d7ea] bg-white px-3.5 text-sm text-[#18325c] outline-none transition focus:border-[#0d234a] focus:shadow-[0_0_0_3px_rgba(13,35,74,0.08)]"
+          type="number"
+          min="0"
+          max="1"
+          step="0.1"
+        />
+      </FieldControl>
+
+      <div class="mt-6 flex justify-end gap-3">
+        <button
+          type="button"
+          class="rounded-xl border border-[#c9d7ea] px-4 py-2.5 text-sm font-semibold text-[#324869] transition hover:border-[#0d234a]"
+          @click="classificationTrainingStore.closeCnnDropoutDialog"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          class="rounded-xl bg-[#0d234a] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#132f63]"
+          @click="classificationTrainingStore.confirmCnnDropoutDialog"
         >
           Confirm
         </button>
