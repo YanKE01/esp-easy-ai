@@ -1,0 +1,185 @@
+"""Filesystem-level dataset validation for esp-easy-ai."""
+
+from __future__ import annotations
+
+import csv
+from pathlib import Path
+from typing import List
+
+from easyai.config.schema import (
+    CsvPerClassDataset,
+    CsvRegressionDataset,
+    EasyAIConfig,
+    ImageFolderDataset,
+    YoloDataset,
+)
+
+
+class DatasetCheckError(Exception):
+    pass
+
+
+def _resolve(base: Path, rel: str) -> Path:
+    p = Path(rel)
+    if p.is_absolute():
+        return p
+    return (base / p).resolve()
+
+
+def _detect_delimiter(path: Path) -> str:
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            return "," if "," in line else "whitespace"
+    return ","
+
+
+def _read_first_row(path: Path, delimiter: str | None, has_header: bool):
+    effective_delimiter = delimiter or _detect_delimiter(path)
+    with open(path, encoding="utf-8") as f:
+        if effective_delimiter in ("whitespace", " "):
+            rows = (line.strip().split() for line in f)
+        else:
+            rows = csv.reader(f, delimiter=effective_delimiter)
+
+        if has_header:
+            next(rows, None)
+        return next(rows, None)
+
+
+def _check_csv_per_class(ds: CsvPerClassDataset, root: Path, errors: List[str]):
+    train_path = root / ds.train_dir
+    val_path = root / ds.val_dir
+
+    if not train_path.exists():
+        errors.append(f"train_dir not found: {train_path}")
+    if not val_path.exists():
+        errors.append(f"val_dir not found: {val_path}")
+    if errors:
+        return
+
+    # Check class_names match actual subdirectory/file names
+    actual_classes = sorted(
+        p.stem if p.is_file() else p.name
+        for p in train_path.iterdir()
+        if p.suffix in (".csv", "") or p.is_dir()
+    )
+    # Only CSV files count
+    actual_classes = sorted(p.stem for p in train_path.iterdir() if p.suffix == ".csv")
+    if not actual_classes:
+        errors.append(f"No CSV files found in train_dir: {train_path}")
+        return
+
+    if ds.class_names:
+        missing = [c for c in ds.class_names if c not in actual_classes]
+        extra = [c for c in actual_classes if c not in ds.class_names]
+        if missing:
+            errors.append(
+                f"class_names {missing} not found as CSV files in {train_path}. "
+                f"Available: {actual_classes}"
+            )
+        if extra:
+            errors.append(
+                f"CSV files {extra} in {train_path} are not listed in class_names"
+            )
+
+    # Check input_shape matches actual data
+    sample_csv = next(train_path.glob("*.csv"), None)
+    if sample_csv:
+        first_row = _read_first_row(sample_csv, ds.delimiter, ds.has_header)
+        if first_row is not None:
+            n_cols = len(first_row)
+            expected_cols = ds.num_features * ds.input_shape[1]
+            if n_cols != expected_cols:
+                errors.append(
+                    f"CSV row has {n_cols} columns but "
+                    f"num_features={ds.num_features} × input_shape[1]={ds.input_shape[1]} "
+                    f"= {expected_cols}"
+                )
+
+
+def _check_csv_regression(ds: CsvRegressionDataset, root: Path, errors: List[str]):
+    train_path = root / ds.train_dir
+    val_path = root / ds.val_dir
+
+    if not train_path.exists():
+        errors.append(f"train_dir not found: {train_path}")
+    if not val_path.exists():
+        errors.append(f"val_dir not found: {val_path}")
+    if errors:
+        return
+
+    sample_csv = next(train_path.glob("*.csv"), None)
+    if sample_csv:
+        first_row = _read_first_row(sample_csv, ds.delimiter, ds.has_header)
+        if first_row is not None:
+            n_cols = len(first_row)
+            expected_cols = ds.num_features * ds.input_shape[1]
+            if n_cols <= expected_cols:
+                errors.append(
+                    f"CSV row has {n_cols} columns; expected at least "
+                    f"num_features × L + label columns = {expected_cols + 1}"
+                )
+
+
+def _check_image_folder(ds: ImageFolderDataset, root: Path, errors: List[str]):
+    train_path = root / ds.train_dir
+    val_path = root / ds.val_dir
+
+    if not train_path.exists():
+        errors.append(f"train_dir not found: {train_path}")
+    if not val_path.exists():
+        errors.append(f"val_dir not found: {val_path}")
+    if errors:
+        return
+
+    actual_classes = sorted(p.name for p in train_path.iterdir() if p.is_dir())
+    if ds.class_names:
+        missing = [c for c in ds.class_names if c not in actual_classes]
+        extra = [c for c in actual_classes if c not in ds.class_names]
+        if missing:
+            errors.append(
+                f"class_names {missing} not found as subdirs in {train_path}. "
+                f"Available: {actual_classes}"
+            )
+        if extra:
+            errors.append(
+                f"Subdirs {extra} in {train_path} are not listed in class_names"
+            )
+
+
+def _check_yolo(ds: YoloDataset, root: Path, errors: List[str]):
+    if ds.data_yaml:
+        yaml_path = Path(ds.data_yaml)
+        if not yaml_path.is_absolute():
+            yaml_path = root / ds.data_yaml
+        if not yaml_path.exists():
+            errors.append(f"data_yaml not found: {yaml_path}")
+
+
+def validate_dataset_files(cfg: EasyAIConfig, config_path: str) -> List[str]:
+    """Check that dataset files/directories exist and match the config.
+
+    Returns a list of error strings (empty = all good).
+    All paths in config are resolved relative to CWD.
+    """
+    root = Path(cfg.dataset.root).resolve()
+
+    if not root.exists():
+        return [f"dataset root not found: {root}"]
+
+    errors: List[str] = []
+    ds = cfg.dataset
+
+    if isinstance(ds, CsvPerClassDataset):
+        _check_csv_per_class(ds, root, errors)
+    elif isinstance(ds, CsvRegressionDataset):
+        _check_csv_regression(ds, root, errors)
+    elif isinstance(ds, ImageFolderDataset):
+        _check_image_folder(ds, root, errors)
+    elif isinstance(ds, YoloDataset):
+        _check_yolo(ds, root, errors)
+
+    return errors

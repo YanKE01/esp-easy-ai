@@ -1,0 +1,44 @@
+[project]
+name = "esp-easy-ai"
+version = "0.1.0"
+description = "JSON-configured model training, quantization and export pipeline for ESP-DL and TFLite Micro"
+requires-python = ">=3.9,<3.10"
+
+dependencies = [
+  "esp-ppq",
+  "torch==2.2.0",
+  "torchvision==0.17.0",
+  "torchaudio==2.2.0",
+  "tensorflow==2.16.2",
+  "onnx>=1.14.0",
+  "onnxruntime>=1.16.0",
+  "numpy>=1.23,<2.0",
+  "pandas>=2.0",
+  "pillow>=9.0",
+  "pyyaml>=6.0",
+  "pydantic>=2.0",
+  "tqdm>=4.65",
+]
+
+[project.scripts]
+easyai = "easyai.cli:main"
+
+[project.optional-dependencies]
+dev = [
+  "pre-commit>=3.7",
+  "pytest>=7.4",
+  "ruff>=0.1",
+]
+
+[tool.uv]
+python-preference = "only-managed"
+
+[tool.uv.sources]
+esp-ppq = { git = "https://github.com/espressif/esp-ppq.git", rev = "41687222823d42e43d0dadd67011c75d361b0c2c" }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["easyai"]

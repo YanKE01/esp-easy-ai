@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+.python-version
+
+# Build / packaging
+*.egg-info/
+dist/
+build/
+
+# Test / lint / coverage
+.pytest_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Runtime outputs
+outputs/
+
+# Editor / OS
+.DS_Store
+
+# Local AI tool state
+.claude/
+.codex/
+
+# Datasets
+datasets/
