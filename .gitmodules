@@ -1,0 +1,3 @@
+[submodule "lib/esp-detection"]
+	path = lib/esp-detection
+	url = https://github.com/espressif/esp-detection.git
