@@ -6,6 +6,7 @@ import sys
 
 from easyai.config.schema import Backend
 from easyai.config import validate_config_file
+from easyai.export import run_export
 from easyai.model import validate_model_definition
 from easyai.quantize import run_quantization
 from easyai.train import run_training
@@ -107,10 +108,18 @@ def cmd_quantize(args):
     print(f"  calibration_source  : {report['calibration_source']}")
     print(f"  calibration_samples : {report['calibration_num_samples']}")
     print(f"  calibration_shuffle : {report['calibration_shuffle']}")
+    if "test_input_index" in report:
+        print(f"  test_input_index    : {report['test_input_index']}")
     if "test_input_shape" in report:
         print(f"  test_input_shape    : {report['test_input_shape']}")
     if "test_input_target" in report:
         print(f"  test_input_target   : {report['test_input_target']}")
+    if "test_output" in report:
+        print(f"  test_output         : {report['test_output']}")
+    if "test_predicted_label" in report:
+        print(f"  test_predicted_label: {report['test_predicted_label']}")
+    if "test_report" in report:
+        print(f"  test_report         : {report['test_report']}")
     if "eval_source" in report:
         print(f"  eval_source         : {report['eval_source']}")
     if "eval_num_samples" in report:
@@ -130,6 +139,38 @@ def cmd_quantize(args):
             )
 
 
+def cmd_export(args):
+    try:
+        cfg = validate_config_file(args.config)
+    except Exception as e:
+        print(f"[FAIL] Validation: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print("[OK]  Validation passed")
+    print(f"  project : {cfg.project_name}")
+    print(f"  backend : {cfg.backend.value}")
+    print(f"  output  : {cfg.output_dir}")
+    print("\n  export:")
+
+    try:
+        report = run_export(cfg)
+    except Exception as e:
+        print(f"[FAIL] Export: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print("\n[OK]  Export finished")
+    if "project_dir" in report:
+        print(f"  project_dir         : {report['project_dir']}")
+    print(f"  component_dir       : {report['component_dir']}")
+    print(f"  main_cpp            : {report['main_cpp']}")
+    print(f"  model               : {report['model']}")
+    print(f"  test_input_index    : {report['test_input_index']}")
+    print(f"  test_input_shape    : {report['test_input_shape']}")
+    print(f"  test_input_target   : {report['test_input_target']}")
+    print(f"  reference_output    : {report['reference_output']}")
+    print(f"  export_report       : {report['export_report']}")
+
+
 def main():
     parser = argparse.ArgumentParser(prog="easyai")
     sub = parser.add_subparsers(dest="command")
@@ -145,6 +186,11 @@ def main():
     )
     p_quantize.add_argument("config", help="Path to config JSON")
 
+    p_export = sub.add_parser(
+        "export", help="Validate config and export ESP component reference files"
+    )
+    p_export.add_argument("config", help="Path to config JSON")
+
     args = parser.parse_args()
     if args.command == "validate":
         cmd_validate(args)
@@ -152,6 +198,8 @@ def main():
         cmd_train(args)
     elif args.command == "quantize":
         cmd_quantize(args)
+    elif args.command == "export":
+        cmd_export(args)
     else:
         parser.print_help()
 

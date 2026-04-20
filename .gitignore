@@ -26,7 +26,6 @@ outputs/
 
 # Local AI tool state
 .claude/
-.codex/
 
 # Datasets
 datasets/

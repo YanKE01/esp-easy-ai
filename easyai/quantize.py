@@ -58,6 +58,13 @@ def _dequantize_array(array: np.ndarray, scale: float, zero_point: int) -> np.nd
     return (array.astype(np.float32) - zero_point) * scale
 
 
+def _to_jsonable_output(array: np.ndarray):
+    flat = np.asarray(array, dtype=np.float32).reshape(-1)
+    if flat.size == 1:
+        return float(flat[0])
+    return [float(v) for v in flat.tolist()]
+
+
 def _evaluate_tflite_model(cfg: EasyAIConfig, model_path: Path) -> dict:
     import tensorflow as tf
 
@@ -91,6 +98,16 @@ def _evaluate_tflite_model(cfg: EasyAIConfig, model_path: Path) -> dict:
         "eval_source": "val",
         "eval_num_samples": int(len(val_y)),
     }
+    if len(val_y) > 0:
+        rng = np.random.default_rng()
+        test_input_index = int(rng.integers(0, len(val_y)))
+        test_output = predictions[test_input_index]
+        report["test_input_index"] = test_input_index
+        report["test_input_shape"] = list(np.asarray(val_x[test_input_index]).shape)
+        report["test_input_target"] = _to_jsonable_target(val_y[test_input_index])
+        report["test_output"] = _to_jsonable_output(test_output)
+        if cfg.task.type == TaskType.CLASSIFICATION:
+            report["test_predicted_label"] = int(np.argmax(test_output))
 
     sample_count = min(10, len(val_y))
     rng = np.random.default_rng(cfg.seed if cfg.seed is not None else 42)
@@ -183,10 +200,31 @@ def _run_tflite_ptq_int8(cfg: EasyAIConfig):
         "output": str(model_path),
     }
     report.update(eval_report)
-    (output_dir / "quantization_report.json").write_text(
+    quantization_report_path = output_dir / "quantization_report.json"
+    quantization_report_path.write_text(
         json.dumps(report, indent=2),
         encoding="utf-8",
     )
+    test_report = {
+        "backend": cfg.backend.value,
+        "method": "ptq",
+        "dtype": "int8",
+        "checkpoint_source": report["checkpoint_source"],
+        "checkpoint": report["checkpoint"],
+        "model": str(model_path),
+        "test_input_index": report.get("test_input_index"),
+        "test_input_shape": report.get("test_input_shape"),
+        "test_input_target": report.get("test_input_target"),
+        "test_output": report.get("test_output"),
+    }
+    if "test_predicted_label" in report:
+        test_report["test_predicted_label"] = report["test_predicted_label"]
+    test_report_path = output_dir / "tflite_test_report.json"
+    test_report_path.write_text(
+        json.dumps(test_report, indent=2),
+        encoding="utf-8",
+    )
+    report["test_report"] = str(test_report_path)
     return report
 
 
@@ -227,13 +265,27 @@ def _run_espdl_ptq_int8(cfg: EasyAIConfig):
     output_dir = Path(cfg.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     model_path = output_dir / "model_int8.espdl"
-    sample_input, sample_target = calibration_loader.dataset[0]
+    rng = np.random.default_rng()
+    if calibration_size == 0:
+        sample_index = 0
+    elif cfg.task.type == TaskType.CLASSIFICATION:
+        label_to_indices = {}
+        for idx in range(calibration_size):
+            _, target_value = calibration_loader.dataset[idx]
+            label = int(_to_jsonable_target(target_value))
+            label_to_indices.setdefault(label, []).append(idx)
+        chosen_label = int(rng.choice(sorted(label_to_indices)))
+        sample_index = int(rng.choice(label_to_indices[chosen_label]))
+    else:
+        sample_index = int(rng.integers(0, calibration_size))
+    sample_input, sample_target = calibration_loader.dataset[sample_index]
     quant_input = sample_input.unsqueeze(0).to("cpu")
     quant_inputs = [quant_input]
 
     def collate_fn(batch):
         return batch[0].to("cpu")
 
+    print("input shape:", [1] + cfg.dataset.input_shape)
     espdl_quantize_torch(
         model=model,
         espdl_export_file=str(model_path),
@@ -264,6 +316,7 @@ def _run_espdl_ptq_int8(cfg: EasyAIConfig):
         "calibration_num_samples": calibration_size,
         "calibration_steps": calibration_steps,
         "calibration_shuffle": False,
+        "test_input_index": sample_index,
         "test_input_shape": list(quant_input.shape),
         "test_input_target": _to_jsonable_target(sample_target),
         "output": str(model_path),

@@ -27,9 +27,10 @@ class TaskType(str, Enum):
 
 class DatasetFormat(str, Enum):
     YOLO = "yolo"
-    CSV_PER_CLASS = "csv_per_class"
+    WINDOWED_PER_CLASS_CSV = "windowed_per_class_csv"
     IMAGE_FOLDER = "image_folder"
-    CSV_REGRESSION = "csv_regression"
+    WINDOWED_REGRESSION_CSV = "windowed_regression_csv"
+    CONTINUOUS_PER_CLASS_CSV = "continuous_per_class_csv"
 
 
 class FeatureLayout(str, Enum):
@@ -164,8 +165,8 @@ class YoloDataset(DatasetBase):
         return self
 
 
-class CsvPerClassDataset(DatasetBase):
-    format: Literal["csv_per_class"]
+class WindowedPerClassDataset(DatasetBase):
+    format: Literal["windowed_per_class_csv"]
     train_dir: str = "train"
     val_dir: str = "test"
     delimiter: Optional[str] = None
@@ -176,10 +177,11 @@ class CsvPerClassDataset(DatasetBase):
     class_names: Optional[List[str]] = None
 
     @model_validator(mode="after")
-    def check_shape_vs_features(self) -> "CsvPerClassDataset":
+    def check_shape_vs_features(self) -> "WindowedPerClassDataset":
         if len(self.input_shape) != 2:
             raise ValueError(
-                f"csv_per_class requires 1D input_shape [C, L], got {self.input_shape}"
+                "windowed_per_class_csv requires 1D input_shape [C, L], "
+                f"got {self.input_shape}"
             )
         if self.input_shape[0] != self.num_features:
             raise ValueError(
@@ -203,8 +205,8 @@ class ImageFolderDataset(DatasetBase):
         return v
 
 
-class CsvRegressionDataset(DatasetBase):
-    format: Literal["csv_regression"]
+class WindowedRegressionDataset(DatasetBase):
+    format: Literal["windowed_regression_csv"]
     train_dir: str = "train"
     val_dir: str = "test"
     delimiter: Optional[str] = None
@@ -217,10 +219,11 @@ class CsvRegressionDataset(DatasetBase):
     target_normalize: Optional[TargetNormalize] = None
 
     @model_validator(mode="after")
-    def check_shape_vs_features(self) -> "CsvRegressionDataset":
+    def check_shape_vs_features(self) -> "WindowedRegressionDataset":
         if len(self.input_shape) != 2:
             raise ValueError(
-                f"csv_regression requires 1D input_shape [C, L], got {self.input_shape}"
+                "windowed_regression_csv requires 1D input_shape [C, L], "
+                f"got {self.input_shape}"
             )
         if self.input_shape[0] != self.num_features:
             raise ValueError(
@@ -229,7 +232,7 @@ class CsvRegressionDataset(DatasetBase):
         return self
 
     @model_validator(mode="after")
-    def check_label_cols(self) -> "CsvRegressionDataset":
+    def check_label_cols(self) -> "WindowedRegressionDataset":
         s, e = self.label_start_col, self.label_end_col
         # Negative indices are checked at data-load time against actual col count.
         # Here we only validate that if both are non-negative, s <= e.
@@ -245,11 +248,44 @@ class CsvRegressionDataset(DatasetBase):
         return self
 
 
+class ContinuousPerClassDataset(DatasetBase):
+    format: Literal["continuous_per_class_csv"]
+    train_dir: str = "train"
+    val_dir: str = "test"
+    delimiter: Optional[str] = None
+    num_features: int = Field(gt=0)
+    has_header: bool = False
+    time_column: Optional[Union[int, str]] = None
+    feature_columns: Optional[List[str]] = None
+    window_size: int = Field(gt=0)
+    window_stride: int = Field(gt=0)
+    num_classes: Optional[int] = Field(default=None, gt=0)
+    class_names: Optional[List[str]] = None
+
+    @model_validator(mode="after")
+    def check_shape_vs_window(self) -> "ContinuousPerClassDataset":
+        if len(self.input_shape) != 2:
+            raise ValueError(
+                "continuous_per_class_csv requires 1D input_shape [C, L], "
+                f"got {self.input_shape}"
+            )
+        if self.input_shape[0] != self.num_features:
+            raise ValueError(
+                f"input_shape[0]={self.input_shape[0]} must equal num_features={self.num_features}"
+            )
+        if self.input_shape[1] != self.window_size:
+            raise ValueError(
+                f"input_shape[1]={self.input_shape[1]} must equal window_size={self.window_size}"
+            )
+        return self
+
+
 DatasetConfig = Union[
     YoloDataset,
-    CsvPerClassDataset,
+    WindowedPerClassDataset,
     ImageFolderDataset,
-    CsvRegressionDataset,
+    WindowedRegressionDataset,
+    ContinuousPerClassDataset,
 ]
 
 
@@ -407,8 +443,11 @@ class EasyAIConfig(BaseModel):
         input_dim = self.task.input_dim
 
         valid_combos = {
-            (1, TaskType.CLASSIFICATION): {DatasetFormat.CSV_PER_CLASS},
-            (1, TaskType.REGRESSION): {DatasetFormat.CSV_REGRESSION},
+            (1, TaskType.CLASSIFICATION): {
+                DatasetFormat.WINDOWED_PER_CLASS_CSV,
+                DatasetFormat.CONTINUOUS_PER_CLASS_CSV,
+            },
+            (1, TaskType.REGRESSION): {DatasetFormat.WINDOWED_REGRESSION_CSV},
             (2, TaskType.CLASSIFICATION): {DatasetFormat.IMAGE_FOLDER},
             (2, TaskType.DETECTION): {DatasetFormat.YOLO},
         }
@@ -465,8 +504,10 @@ class EasyAIConfig(BaseModel):
         if self.task.type == TaskType.CLASSIFICATION:
             ds = self.dataset
             if not hasattr(ds, "num_classes") or ds.num_classes is None:
-                # csv_per_class allows inferring from file count, so it's optional
-                if ds.format != DatasetFormat.CSV_PER_CLASS:
+                if ds.format not in {
+                    DatasetFormat.WINDOWED_PER_CLASS_CSV,
+                    DatasetFormat.CONTINUOUS_PER_CLASS_CSV,
+                }:
                     raise ValueError(
                         "num_classes is required in dataset for classification task"
                     )

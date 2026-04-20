@@ -109,7 +109,7 @@ def _merge_quantization_defaults(raw: dict) -> None:
     raw["quantization"] = merged
 
 
-def _infer_csv_per_class(dataset: dict) -> dict:
+def _infer_windowed_per_class(dataset: dict) -> dict:
     root = Path(dataset["root"])
     train_dir = dataset.get("train_dir", "train")
     val_dir = dataset.get("val_dir", "test")
@@ -126,7 +126,7 @@ def _infer_csv_per_class(dataset: dict) -> dict:
         p.stem for p in train_path.glob("*.csv")
     )
     return {
-        "format": "csv_per_class",
+        "format": "windowed_per_class_csv",
         "train_dir": train_dir,
         "val_dir": val_dir,
         "feature_layout": dataset.get("feature_layout", "interleaved"),
@@ -143,7 +143,7 @@ def _infer_csv_per_class(dataset: dict) -> dict:
     }
 
 
-def _infer_csv_regression(dataset: dict) -> dict:
+def _infer_windowed_regression(dataset: dict) -> dict:
     root = Path(dataset["root"])
     train_dir = dataset.get("train_dir", "train")
     val_dir = dataset.get("val_dir", "test")
@@ -158,7 +158,7 @@ def _infer_csv_regression(dataset: dict) -> dict:
         )
     length = feature_values // num_features
     return {
-        "format": "csv_regression",
+        "format": "windowed_regression_csv",
         "train_dir": train_dir,
         "val_dir": val_dir,
         "feature_layout": dataset.get("feature_layout", "interleaved"),
@@ -176,6 +176,43 @@ def _infer_csv_regression(dataset: dict) -> dict:
     }
 
 
+def _infer_continuous_per_class(dataset: dict) -> dict:
+    root = Path(dataset["root"])
+    train_dir = dataset.get("train_dir", "train")
+    val_dir = dataset.get("val_dir", "test")
+    train_path = root / train_dir
+    class_names = dataset.get("class_names") or sorted(
+        p.name for p in train_path.iterdir() if p.is_dir()
+    )
+    window_size = dataset.get("window_size")
+    window_stride = dataset.get("window_stride")
+    if window_size is None or window_stride is None:
+        raise ValueError(
+            "dataset.window_size and dataset.window_stride are required for continuous_per_class_csv"
+        )
+    return {
+        "format": "continuous_per_class_csv",
+        "train_dir": train_dir,
+        "val_dir": val_dir,
+        "has_header": dataset.get("has_header", False),
+        "time_column": dataset.get("time_column"),
+        "feature_columns": dataset.get("feature_columns"),
+        "window_size": window_size,
+        "window_stride": window_stride,
+        "input_shape": dataset.get(
+            "input_shape", [dataset["num_features"], window_size]
+        ),
+        "num_classes": dataset.get("num_classes", len(class_names)),
+        "class_names": class_names,
+        "transforms": dataset.get("transforms", {"train": "none", "val": "none"}),
+        "batch_size": dataset.get("batch_size", 64),
+        "num_workers": dataset.get("num_workers", 4),
+        "calibration": dataset.get(
+            "calibration", {"source": "reuse_val", "num_samples": 256}
+        ),
+    }
+
+
 def _apply_dataset_defaults(raw: dict) -> None:
     dataset = raw["dataset"]
     task_type = raw["task"]["type"]
@@ -184,18 +221,24 @@ def _apply_dataset_defaults(raw: dict) -> None:
     if input_dim != 1:
         return
 
-    if "format" in dataset and "input_shape" in dataset:
-        return
-
     if "root" not in dataset or "num_features" not in dataset:
         raise ValueError(
             "dataset.root and dataset.num_features are required in small white-user mode"
         )
 
-    if task_type == "classification":
-        defaults = _infer_csv_per_class(dataset)
+    fmt = dataset.get("format")
+    if fmt == "continuous_per_class_csv":
+        defaults = _infer_continuous_per_class(dataset)
+    elif fmt == "windowed_per_class_csv":
+        defaults = _infer_windowed_per_class(dataset)
+    elif fmt == "windowed_regression_csv":
+        defaults = _infer_windowed_regression(dataset)
+    elif fmt is not None:
+        return
+    elif task_type == "classification":
+        defaults = _infer_windowed_per_class(dataset)
     elif task_type == "regression":
-        defaults = _infer_csv_regression(dataset)
+        defaults = _infer_windowed_regression(dataset)
     else:
         return
 
