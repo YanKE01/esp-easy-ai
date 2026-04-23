@@ -263,11 +263,6 @@ def _run_torch_training(cfg: EasyAIConfig):
 def _run_keras_training(cfg: EasyAIConfig):
     import tensorflow as tf
 
-    if cfg.task.input_dim != 1:
-        raise NotImplementedError(
-            "tflite-micro training is currently implemented only for 1D tasks."
-        )
-
     if cfg.seed is not None:
         tf.keras.utils.set_random_seed(cfg.seed)
 
@@ -360,6 +355,8 @@ def _run_keras_training(cfg: EasyAIConfig):
 def run_training(cfg: EasyAIConfig):
     if cfg.model is None or cfg.training is None:
         raise ValueError("Training requires model and training config.")
+    if cfg.task.input_dim != 1:
+        raise NotImplementedError("Training currently supports only 1D tasks.")
     if cfg.backend == Backend.ESP_DL:
         return _run_torch_training(cfg)
     if cfg.backend == Backend.TFLITE_MICRO:

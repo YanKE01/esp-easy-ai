@@ -22,14 +22,12 @@ class Backend(str, Enum):
 class TaskType(str, Enum):
     CLASSIFICATION = "classification"
     REGRESSION = "regression"
-    DETECTION = "detection"
 
 
 class DatasetFormat(str, Enum):
-    YOLO = "yolo"
-    CSV_PER_CLASS = "csv_per_class"
-    IMAGE_FOLDER = "image_folder"
-    CSV_REGRESSION = "csv_regression"
+    WINDOWED_PER_CLASS_CSV = "windowed_per_class_csv"
+    WINDOWED_REGRESSION_CSV = "windowed_regression_csv"
+    CONTINUOUS_PER_CLASS_CSV = "continuous_per_class_csv"
 
 
 class FeatureLayout(str, Enum):
@@ -43,7 +41,7 @@ class FeatureLayout(str, Enum):
 
 
 class TaskConfig(BaseModel):
-    input_dim: Literal[1, 2]
+    input_dim: Literal[1] = 1
     type: TaskType
 
 
@@ -100,17 +98,6 @@ class CalibrationConfig(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Sub-models: Detection metadata
-# ---------------------------------------------------------------------------
-
-
-class DetectionMeta(BaseModel):
-    num_classes: int = Field(gt=0)
-    bbox_format: Literal["cxcywh"] = "cxcywh"
-    class_names: Optional[List[str]] = None
-
-
-# ---------------------------------------------------------------------------
 # Sub-models: Target normalization (regression)
 # ---------------------------------------------------------------------------
 
@@ -141,31 +128,15 @@ class DatasetBase(BaseModel):
     @field_validator("input_shape")
     @classmethod
     def check_input_shape(cls, v: List[int]) -> List[int]:
-        if len(v) not in (2, 3):
-            raise ValueError(
-                f"input_shape must be [C, L] (1D) or [C, H, W] (2D), got length {len(v)}"
-            )
+        if len(v) != 2:
+            raise ValueError(f"input_shape must be [C, L] (1D), got length {len(v)}")
         if any(d <= 0 for d in v):
             raise ValueError("All dimensions in input_shape must be > 0")
         return v
 
 
-class YoloDataset(DatasetBase):
-    format: Literal["yolo"]
-    data_yaml: Optional[str] = None
-    detection: DetectionMeta
-
-    @model_validator(mode="after")
-    def check_class_names_or_yaml(self) -> "YoloDataset":
-        if self.data_yaml is None and not self.detection.class_names:
-            raise ValueError(
-                "Either data_yaml or detection.class_names must be provided"
-            )
-        return self
-
-
-class CsvPerClassDataset(DatasetBase):
-    format: Literal["csv_per_class"]
+class WindowedPerClassDataset(DatasetBase):
+    format: Literal["windowed_per_class_csv"]
     train_dir: str = "train"
     val_dir: str = "test"
     delimiter: Optional[str] = None
@@ -176,11 +147,7 @@ class CsvPerClassDataset(DatasetBase):
     class_names: Optional[List[str]] = None
 
     @model_validator(mode="after")
-    def check_shape_vs_features(self) -> "CsvPerClassDataset":
-        if len(self.input_shape) != 2:
-            raise ValueError(
-                f"csv_per_class requires 1D input_shape [C, L], got {self.input_shape}"
-            )
+    def check_shape_vs_features(self) -> "WindowedPerClassDataset":
         if self.input_shape[0] != self.num_features:
             raise ValueError(
                 f"input_shape[0]={self.input_shape[0]} must equal num_features={self.num_features}"
@@ -188,23 +155,8 @@ class CsvPerClassDataset(DatasetBase):
         return self
 
 
-class ImageFolderDataset(DatasetBase):
-    format: Literal["image_folder"]
-    train_dir: str = "train"
-    val_dir: str = "val"
-    num_classes: int = Field(gt=0)
-    class_names: Optional[List[str]] = None
-
-    @field_validator("input_shape")
-    @classmethod
-    def check_2d_shape(cls, v: List[int]) -> List[int]:
-        if len(v) != 3:
-            raise ValueError(f"image_folder requires 2D input_shape [C, H, W], got {v}")
-        return v
-
-
-class CsvRegressionDataset(DatasetBase):
-    format: Literal["csv_regression"]
+class WindowedRegressionDataset(DatasetBase):
+    format: Literal["windowed_regression_csv"]
     train_dir: str = "train"
     val_dir: str = "test"
     delimiter: Optional[str] = None
@@ -217,11 +169,7 @@ class CsvRegressionDataset(DatasetBase):
     target_normalize: Optional[TargetNormalize] = None
 
     @model_validator(mode="after")
-    def check_shape_vs_features(self) -> "CsvRegressionDataset":
-        if len(self.input_shape) != 2:
-            raise ValueError(
-                f"csv_regression requires 1D input_shape [C, L], got {self.input_shape}"
-            )
+    def check_shape_vs_features(self) -> "WindowedRegressionDataset":
         if self.input_shape[0] != self.num_features:
             raise ValueError(
                 f"input_shape[0]={self.input_shape[0]} must equal num_features={self.num_features}"
@@ -229,7 +177,7 @@ class CsvRegressionDataset(DatasetBase):
         return self
 
     @model_validator(mode="after")
-    def check_label_cols(self) -> "CsvRegressionDataset":
+    def check_label_cols(self) -> "WindowedRegressionDataset":
         s, e = self.label_start_col, self.label_end_col
         # Negative indices are checked at data-load time against actual col count.
         # Here we only validate that if both are non-negative, s <= e.
@@ -245,11 +193,37 @@ class CsvRegressionDataset(DatasetBase):
         return self
 
 
+class ContinuousPerClassDataset(DatasetBase):
+    format: Literal["continuous_per_class_csv"]
+    train_dir: str = "train"
+    val_dir: str = "test"
+    delimiter: Optional[str] = None
+    num_features: int = Field(gt=0)
+    has_header: bool = False
+    time_column: Optional[Union[int, str]] = None
+    feature_columns: Optional[List[str]] = None
+    window_size: int = Field(gt=0)
+    window_stride: int = Field(gt=0)
+    num_classes: Optional[int] = Field(default=None, gt=0)
+    class_names: Optional[List[str]] = None
+
+    @model_validator(mode="after")
+    def check_shape_vs_window(self) -> "ContinuousPerClassDataset":
+        if self.input_shape[0] != self.num_features:
+            raise ValueError(
+                f"input_shape[0]={self.input_shape[0]} must equal num_features={self.num_features}"
+            )
+        if self.input_shape[1] != self.window_size:
+            raise ValueError(
+                f"input_shape[1]={self.input_shape[1]} must equal window_size={self.window_size}"
+            )
+        return self
+
+
 DatasetConfig = Union[
-    YoloDataset,
-    CsvPerClassDataset,
-    ImageFolderDataset,
-    CsvRegressionDataset,
+    WindowedPerClassDataset,
+    WindowedRegressionDataset,
+    ContinuousPerClassDataset,
 ]
 
 
@@ -257,20 +231,13 @@ DatasetConfig = Union[
 # Sub-models: Model layer
 # ---------------------------------------------------------------------------
 
-# Unified layer names from plan §4.1
 SUPPORTED_LAYER_TYPES = {
     "Conv1d",
-    "Conv2d",
-    "DepthwiseConv2d",
     "Linear",
     "BatchNorm1d",
-    "BatchNorm2d",
     "MaxPool1d",
-    "MaxPool2d",
     "AvgPool1d",
-    "AvgPool2d",
     "GlobalAvgPool1d",
-    "GlobalAvgPool2d",
     "Flatten",
     "Dropout",
     "ReLU",
@@ -309,12 +276,12 @@ class ModelConfig(BaseModel):
 
 
 class OptimizerConfig(BaseModel):
-    type: str  # Unified name: Adam, SGD, etc.
+    type: str  # Unified name: Adam, SGD
     model_config = {"extra": "allow"}
 
 
 class LrSchedulerConfig(BaseModel):
-    type: str  # Unified name: CosineAnnealingLR, StepLR, etc.
+    type: str  # Unified name: CosineAnnealingLR, StepLR
     model_config = {"extra": "allow"}
 
 
@@ -332,7 +299,7 @@ class TrainingConfig(BaseModel):
     epochs: int = Field(gt=0)
     optimizer: OptimizerConfig
     lr_scheduler: Optional[LrSchedulerConfig] = None
-    loss: str  # Unified name: cross_entropy, mse, l1, huber, etc.
+    loss: str  # Unified name: cross_entropy, mse, l1, huber
     metrics: List[str] = Field(default_factory=lambda: ["accuracy"])
     early_stopping: Optional[EarlyStoppingConfig] = None
     checkpoint: Optional[CheckpointConfig] = None
@@ -348,30 +315,8 @@ class QuantizationConfig(BaseModel):
     enable: bool = True
     method: Literal["ptq"] = "ptq"
     dtype: Literal["int8"] = "int8"
-    target: Literal["c", "esp32s3", "esp32p4"] = "esp32s3"
+    target: str = Field(default="esp32s3", min_length=1)
     checkpoint: Literal["best", "last"] = "best"
-
-
-# ---------------------------------------------------------------------------
-# Sub-models: Export
-# ---------------------------------------------------------------------------
-
-
-class ExportConfig(BaseModel):
-    formats: List[str]
-    opset_version: Optional[int] = None  # Only for esp-dl (ONNX)
-    cc_variable_name: Optional[str] = None  # Only for tflite-micro
-
-
-# ---------------------------------------------------------------------------
-# Sub-models: Validation (detection-only)
-# ---------------------------------------------------------------------------
-
-
-class ValidationConfig(BaseModel):
-    strict: bool = True
-    sample_stats: bool = True
-    max_report_issues: int = Field(gt=0, default=100)
 
 
 # ---------------------------------------------------------------------------
@@ -388,14 +333,9 @@ class EasyAIConfig(BaseModel):
 
     dataset: DatasetConfig = Field(discriminator="format")
 
-    # Detection task: these fields are forbidden
-    model: Optional[ModelConfig] = None
-    training: Optional[TrainingConfig] = None
+    model: ModelConfig
+    training: TrainingConfig
     quantization: Optional[QuantizationConfig] = None
-    export: Optional[ExportConfig] = None
-
-    # Detection-only
-    validation: Optional[ValidationConfig] = None
 
     # ---- Cross-field validators ----
 
@@ -404,106 +344,30 @@ class EasyAIConfig(BaseModel):
         """Ensure dataset format matches the task type."""
         fmt = self.dataset.format
         task_type = self.task.type
-        input_dim = self.task.input_dim
 
         valid_combos = {
-            (1, TaskType.CLASSIFICATION): {DatasetFormat.CSV_PER_CLASS},
-            (1, TaskType.REGRESSION): {DatasetFormat.CSV_REGRESSION},
-            (2, TaskType.CLASSIFICATION): {DatasetFormat.IMAGE_FOLDER},
-            (2, TaskType.DETECTION): {DatasetFormat.YOLO},
+            TaskType.CLASSIFICATION: {
+                DatasetFormat.WINDOWED_PER_CLASS_CSV,
+                DatasetFormat.CONTINUOUS_PER_CLASS_CSV,
+            },
+            TaskType.REGRESSION: {DatasetFormat.WINDOWED_REGRESSION_CSV},
         }
-        allowed = valid_combos.get((input_dim, task_type))
-        if allowed is None:
-            raise ValueError(
-                f"Unsupported task combination: input_dim={input_dim}, type={task_type}"
-            )
+        allowed = valid_combos[task_type]
         if fmt not in allowed:
             raise ValueError(
-                f"Dataset format '{fmt}' is not valid for task "
-                f"(input_dim={input_dim}, type={task_type}). "
+                f"Dataset format '{fmt}' is not valid for task type '{task_type}'. "
                 f"Expected one of: {[f.value for f in allowed]}"
             )
         return self
 
     @model_validator(mode="after")
-    def check_input_shape_dims(self) -> "EasyAIConfig":
-        """input_shape length must match task.input_dim."""
-        expected_len = self.task.input_dim + 1  # C+L=2 for 1D, C+H+W=3 for 2D
-        actual = len(self.dataset.input_shape)
-        if actual != expected_len:
-            raise ValueError(
-                f"input_shape has {actual} dims but task.input_dim={self.task.input_dim} "
-                f"expects {expected_len} dims"
-            )
-        return self
-
-    @model_validator(mode="after")
-    def check_detection_fields(self) -> "EasyAIConfig":
-        """Detection task: model/training/quantization/export are forbidden;
-        validation is allowed."""
-        if self.task.type == TaskType.DETECTION:
-            for field_name in ("model", "training", "quantization", "export"):
-                if getattr(self, field_name) is not None:
-                    raise ValueError(
-                        f"'{field_name}' must not be set for detection task "
-                        f"(detection only does dataset validation)"
-                    )
-        else:
-            # Non-detection: model and training are required for PC experiments.
-            for field_name in ("model", "training"):
-                if getattr(self, field_name) is None:
-                    raise ValueError(
-                        f"'{field_name}' is required for task.type={self.task.type.value}"
-                    )
-            if self.validation is not None:
-                raise ValueError("'validation' is only valid for detection task")
-        return self
-
-    @model_validator(mode="after")
-    def check_classification_has_num_classes(self) -> "EasyAIConfig":
-        """Classification tasks require num_classes in dataset."""
-        if self.task.type == TaskType.CLASSIFICATION:
-            ds = self.dataset
-            if not hasattr(ds, "num_classes") or ds.num_classes is None:
-                # csv_per_class allows inferring from file count, so it's optional
-                if ds.format != DatasetFormat.CSV_PER_CLASS:
-                    raise ValueError(
-                        "num_classes is required in dataset for classification task"
-                    )
-        return self
-
-    @model_validator(mode="after")
-    def check_1d_layers_match(self) -> "EasyAIConfig":
-        """Warn if 1D task uses 2D layers or vice versa."""
-        if self.model is None:
+    def check_quantization_target_for_backend(self) -> "EasyAIConfig":
+        if self.quantization is None:
             return self
-        dim = self.task.input_dim
-        dim_1d_layers = {
-            "Conv1d",
-            "MaxPool1d",
-            "AvgPool1d",
-            "GlobalAvgPool1d",
-            "BatchNorm1d",
-        }
-        dim_2d_layers = {
-            "Conv2d",
-            "MaxPool2d",
-            "AvgPool2d",
-            "GlobalAvgPool2d",
-            "BatchNorm2d",
-            "DepthwiseConv2d",
-        }
-
-        for layer in self.model.layers:
-            if dim == 1 and layer.type in dim_2d_layers:
+        if self.backend == Backend.ESP_DL:
+            if self.quantization.target not in {"esp32s3", "esp32p4"}:
                 raise ValueError(
-                    f"Layer '{layer.type}' is a 2D layer but task.input_dim=1. "
-                    f"Use the 1D variant instead."
-                )
-            if dim == 2 and layer.type in dim_1d_layers:
-                raise ValueError(
-                    f"Layer '{layer.type}' is a 1D layer but task.input_dim=2. "
-                    f"Use the 2D variant instead."
+                    "quantization.target must be 'esp32s3' or 'esp32p4' when backend='esp-dl'"
                 )
         return self
 

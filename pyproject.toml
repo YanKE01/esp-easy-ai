@@ -1,8 +1,22 @@
 [project]
 name = "esp-easy-ai"
-version = "0.1.0"
-description = "JSON-configured model training, quantization and export pipeline for ESP-DL and TFLite Micro"
+version = "0.1.0.dev1"
+description = "JSON-configured model training, quantization, and export pipeline for ESP32 with ESP-DL and TFLite Micro"
+authors = [
+  { name = "Yanke", email = "yankeing@foxmail.com" },
+]
+readme = "README.md"
 requires-python = ">=3.9,<3.10"
+keywords = ["esp32", "esp-dl", "tflite-micro", "tinyml", "embedded-ai"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Topic :: Software Development :: Embedded Systems",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Operating System :: OS Independent",
+]
 
 dependencies = [
   "esp-ppq",
@@ -21,7 +35,7 @@ dependencies = [
 ]
 
 [project.scripts]
-easyai = "easyai.cli:main"
+esp-easy-ai = "easyai.cli:main"
 
 [project.optional-dependencies]
 dev = [
@@ -40,5 +54,34 @@ esp-ppq = { git = "https://github.com/espressif/esp-ppq.git", rev = "41687222823
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.build]
+exclude = [
+  "/.codex",
+  "/.claude",
+  "/.git",
+  "/.gitignore",
+  "/.pre-commit-config.yaml",
+  "/.pytest_cache",
+  "/.ruff_cache",
+  "/.venv",
+  "/dist",
+  "/outputs",
+  "/uv.lock",
+  "**/__pycache__",
+  "**/*.py[cod]",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["easyai"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"skills/esp-easy-ai/SKILL.md" = "easyai/resources/skills/esp-easy-ai/SKILL.md"
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/easyai",
+  "/skills/esp-easy-ai/SKILL.md",
+  "/README.md",
+  "/README_ZH.md",
+  "/pyproject.toml",
+]

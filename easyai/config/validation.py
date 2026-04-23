@@ -45,8 +45,7 @@ def validate_config_file(path: Union[str, Path]) -> EasyAIConfig:
             "Dataset validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
         )
 
-    if cfg.model is not None:
-        validate_model_definition(cfg)
+    validate_model_definition(cfg)
 
     return cfg
 

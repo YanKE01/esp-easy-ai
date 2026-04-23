@@ -2,16 +2,15 @@
 
 import argparse
 import io
+import importlib.resources
+from pathlib import Path
 import sys
-
-from easyai.config.schema import Backend
-from easyai.config import validate_config_file
-from easyai.model import validate_model_definition
-from easyai.quantize import run_quantization
-from easyai.train import run_training
 
 
 def _format_model_definition(cfg):
+    from easyai.config.schema import Backend
+    from easyai.model import validate_model_definition
+
     if cfg.model is None:
         return None
 
@@ -27,7 +26,34 @@ def _format_model_definition(cfg):
     return str(model)
 
 
+def _print_per_class_accuracy(label: str, rows: list[dict]):
+    if not rows:
+        return
+    print(f"  {label}:")
+    for row in rows:
+        print(
+            "    "
+            f"class {row['label']}: "
+            f"{row['correct']}/{row['total']} "
+            f"({row['accuracy'] * 100:.4f}%)"
+        )
+
+
+def _skill_resource():
+    packaged = importlib.resources.files("easyai").joinpath(
+        "resources/skills/esp-easy-ai/SKILL.md"
+    )
+    if packaged.is_file():
+        return packaged
+
+    return (
+        Path(__file__).resolve().parent.parent / "skills" / "esp-easy-ai" / "SKILL.md"
+    )
+
+
 def cmd_validate(args):
+    from easyai.config import validate_config_file
+
     try:
         cfg = validate_config_file(args.config)
     except Exception as e:
@@ -49,6 +75,9 @@ def cmd_validate(args):
 
 
 def cmd_train(args):
+    from easyai.config import validate_config_file
+    from easyai.train import run_training
+
     try:
         cfg = validate_config_file(args.config)
     except Exception as e:
@@ -77,6 +106,9 @@ def cmd_train(args):
 
 
 def cmd_quantize(args):
+    from easyai.config import validate_config_file
+    from easyai.quantize import run_quantization
+
     try:
         cfg = validate_config_file(args.config)
     except Exception as e:
@@ -107,31 +139,112 @@ def cmd_quantize(args):
     print(f"  calibration_source  : {report['calibration_source']}")
     print(f"  calibration_samples : {report['calibration_num_samples']}")
     print(f"  calibration_shuffle : {report['calibration_shuffle']}")
+    if "test_input_index" in report:
+        print(f"  test_input_index    : {report['test_input_index']}")
     if "test_input_shape" in report:
         print(f"  test_input_shape    : {report['test_input_shape']}")
     if "test_input_target" in report:
         print(f"  test_input_target   : {report['test_input_target']}")
+    if "test_output" in report:
+        print(f"  test_output         : {report['test_output']}")
+    if "test_predicted_label" in report:
+        print(f"  test_predicted_label: {report['test_predicted_label']}")
+    if "test_report" in report:
+        print(f"  test_report         : {report['test_report']}")
     if "eval_source" in report:
         print(f"  eval_source         : {report['eval_source']}")
     if "eval_num_samples" in report:
         print(f"  eval_samples        : {report['eval_num_samples']}")
     if "eval_accuracy" in report:
         print(f"  eval_accuracy       : {report['eval_accuracy']:.4f}")
+    if "fp32_eval_accuracy" in report:
+        print(f"  fp32_eval_accuracy  : {report['fp32_eval_accuracy']:.4f}")
     if "eval_mae" in report:
         print(f"  eval_mae            : {report['eval_mae']:.4f}")
     if "eval_rmse" in report:
         print(f"  eval_rmse           : {report['eval_rmse']:.4f}")
     print(f"  output              : {report['output']}")
-    if report.get("eval_examples"):
-        print("  eval_examples:")
-        for example in report["eval_examples"]:
-            print(
-                f"    idx={example['index']} pred={example['pred']} target={example['target']}"
-            )
+    if (
+        report.get("fp32_eval_accuracy") is not None
+        and report.get("eval_accuracy") is not None
+    ):
+        sample_count = report.get("eval_num_samples")
+        sample_text = f" ({sample_count} samples)" if sample_count is not None else ""
+        print(f"\n  === Evaluating on validation set{sample_text} ===")
+        print(f"  FP32 valid accuracy     : {report['fp32_eval_accuracy'] * 100:.4f}%")
+        _print_per_class_accuracy(
+            "FP32 per-class accuracy", report.get("fp32_per_class_accuracy", [])
+        )
+        print(f"  Quantized valid accuracy: {report['eval_accuracy'] * 100:.4f}%")
+        _print_per_class_accuracy(
+            "Quantized per-class accuracy",
+            report.get("quantized_per_class_accuracy", []),
+        )
+
+
+def cmd_export(args):
+    from easyai.config import validate_config_file
+    from easyai.export import run_export
+
+    try:
+        cfg = validate_config_file(args.config)
+    except Exception as e:
+        print(f"[FAIL] Validation: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print("[OK]  Validation passed")
+    print(f"  project : {cfg.project_name}")
+    print(f"  backend : {cfg.backend.value}")
+    print(f"  output  : {cfg.output_dir}")
+    print("\n  export:")
+
+    try:
+        report = run_export(cfg)
+    except Exception as e:
+        print(f"[FAIL] Export: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    print("\n[OK]  Export finished")
+    if "project_dir" in report:
+        print(f"  project_dir         : {report['project_dir']}")
+    print(f"  component_dir       : {report['component_dir']}")
+    print(f"  main_cpp            : {report['main_cpp']}")
+    print(f"  model               : {report['model']}")
+    if "test_image" in report:
+        print(f"  test_image          : {report['test_image']}")
+    print(f"  test_input_index    : {report['test_input_index']}")
+    print(f"  test_input_shape    : {report['test_input_shape']}")
+    print(f"  test_input_target   : {report['test_input_target']}")
+    print(f"  reference_output    : {report['reference_output']}")
+    print(f"  export_report       : {report['export_report']}")
 
 
 def main():
-    parser = argparse.ArgumentParser(prog="easyai")
+    skill_path = str(_skill_resource())
+    parser = argparse.ArgumentParser(
+        prog="esp-easy-ai",
+        description="JSON-driven training, quantization, and export pipeline for ESP AI workloads.",
+        epilog=(
+            "Current scope:\n"
+            "  - 1D only\n"
+            "  - Backends: esp-dl, tflite-micro\n"
+            "  - Dataset formats: windowed_per_class_csv, windowed_regression_csv, continuous_per_class_csv\n"
+            "\n"
+            "Config styles:\n"
+            "  - Simple mode: use model.preset (tiny_conv_1d, tiny_mlp_1d)\n"
+            "  - Advanced mode: use model.layers\n"
+            "\n"
+            "Workflow:\n"
+            "  esp-easy-ai validate <config.json>\n"
+            "  esp-easy-ai train <config.json>\n"
+            "  esp-easy-ai quantize <config.json>\n"
+            "  esp-easy-ai export <config.json>\n"
+            "\n"
+            "AI-agent skill guide:\n"
+            f"  Path: {skill_path}"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     sub = parser.add_subparsers(dest="command")
 
     p_validate = sub.add_parser("validate", help="Validate a JSON config file")
@@ -145,6 +258,11 @@ def main():
     )
     p_quantize.add_argument("config", help="Path to config JSON")
 
+    p_export = sub.add_parser(
+        "export", help="Validate config and export ESP component reference files"
+    )
+    p_export.add_argument("config", help="Path to config JSON")
+
     args = parser.parse_args()
     if args.command == "validate":
         cmd_validate(args)
@@ -152,6 +270,8 @@ def main():
         cmd_train(args)
     elif args.command == "quantize":
         cmd_quantize(args)
+    elif args.command == "export":
+        cmd_export(args)
     else:
         parser.print_help()
 

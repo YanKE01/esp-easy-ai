@@ -1,4 +1,4 @@
-"""Minimal dataset loaders for 1D training."""
+"""Minimal dataset loaders for the current 1D pipeline."""
 
 from __future__ import annotations
 
@@ -10,12 +10,13 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 
 from easyai.config.schema import (
-    CsvPerClassDataset,
-    CsvRegressionDataset,
+    ContinuousPerClassDataset,
     DatasetFormat,
     EasyAIConfig,
     FeatureLayout,
     TaskType,
+    WindowedPerClassDataset,
+    WindowedRegressionDataset,
 )
 from easyai.data.transforms import compile_transforms
 
@@ -51,6 +52,25 @@ def _read_rows(
                 continue
             rows.append([float(x) for x in _split_row(line, effective_delimiter)])
     return rows
+
+
+def _read_string_rows(
+    path: Path, delimiter: str | None, has_header: bool
+) -> tuple[list[str] | None, list[list[str]]]:
+    effective_delimiter = delimiter or _detect_delimiter(path)
+    header: list[str] | None = None
+    rows: list[list[str]] = []
+    with open(path, encoding="utf-8") as f:
+        for idx, line in enumerate(f):
+            line = line.strip()
+            if not line:
+                continue
+            parts = _split_row(line, effective_delimiter)
+            if idx == 0 and has_header:
+                header = parts
+                continue
+            rows.append(parts)
+    return header, rows
 
 
 def _reshape_features(
@@ -102,16 +122,27 @@ def _build_split_datasets(cfg: EasyAIConfig):
     transforms_cfg = ds.transforms
     root = Path(ds.root)
 
-    if ds.format == DatasetFormat.CSV_PER_CLASS:
-        train_features, train_targets = _load_csv_per_class_split(
+    if ds.format == DatasetFormat.WINDOWED_PER_CLASS_CSV:
+        train_features, train_targets = _load_windowed_per_class_split(
             ds, root / ds.train_dir
         )
-        val_features, val_targets = _load_csv_per_class_split(ds, root / ds.val_dir)
-    elif ds.format == DatasetFormat.CSV_REGRESSION:
-        train_features, train_targets = _load_csv_regression_split(
+        val_features, val_targets = _load_windowed_per_class_split(
+            ds, root / ds.val_dir
+        )
+    elif ds.format == DatasetFormat.WINDOWED_REGRESSION_CSV:
+        train_features, train_targets = _load_windowed_regression_split(
             ds, root / ds.train_dir
         )
-        val_features, val_targets = _load_csv_regression_split(ds, root / ds.val_dir)
+        val_features, val_targets = _load_windowed_regression_split(
+            ds, root / ds.val_dir
+        )
+    elif ds.format == DatasetFormat.CONTINUOUS_PER_CLASS_CSV:
+        train_features, train_targets = _load_continuous_per_class_split(
+            ds, root / ds.train_dir
+        )
+        val_features, val_targets = _load_continuous_per_class_split(
+            ds, root / ds.val_dir
+        )
     else:
         raise NotImplementedError(
             f"Training data loader not implemented for dataset format: {ds.format}"
@@ -141,7 +172,67 @@ def _select_calibration_dataset(cfg: EasyAIConfig):
     return dataset, num_samples
 
 
-def _load_csv_per_class_split(ds: CsvPerClassDataset, split_dir: Path):
+def _target_to_label_value(target) -> int:
+    if isinstance(target, torch.Tensor):
+        if target.ndim == 0:
+            return int(target.item())
+        return int(target.reshape(-1)[0].item())
+    if hasattr(target, "tolist"):
+        value = target.tolist()
+        if isinstance(value, list):
+            return int(value[0])
+        return int(value)
+    return int(target)
+
+
+def _build_calibration_indices(
+    dataset: Dataset, num_samples: int, task_type: TaskType, seed: int | None
+) -> list[int]:
+    total = len(dataset)
+    if num_samples >= total:
+        return list(range(total))
+
+    rng = np.random.default_rng(seed if seed is not None else 42)
+    if task_type != TaskType.CLASSIFICATION:
+        return rng.choice(total, size=num_samples, replace=False).tolist()
+
+    label_to_indices: dict[int, list[int]] = {}
+    for idx in range(total):
+        _, target = dataset[idx]
+        label = _target_to_label_value(target)
+        label_to_indices.setdefault(label, []).append(idx)
+
+    for indices in label_to_indices.values():
+        rng.shuffle(indices)
+
+    labels = list(label_to_indices.keys())
+    rng.shuffle(labels)
+    selected: list[int] = []
+    cursor = 0
+    while len(selected) < num_samples and labels:
+        label = labels[cursor % len(labels)]
+        bucket = label_to_indices[label]
+        if bucket:
+            selected.append(bucket.pop())
+        labels = [item for item in labels if label_to_indices[item]]
+        if not labels:
+            break
+        cursor += 1
+
+    if len(selected) < num_samples:
+        remaining = [idx for idx in range(total) if idx not in set(selected)]
+        if remaining:
+            extra = rng.choice(
+                remaining,
+                size=min(num_samples - len(selected), len(remaining)),
+                replace=False,
+            ).tolist()
+            selected.extend(extra)
+
+    return selected[:num_samples]
+
+
+def _load_windowed_per_class_split(ds: WindowedPerClassDataset, split_dir: Path):
     length = ds.input_shape[1]
     class_names = ds.class_names or sorted(p.stem for p in split_dir.glob("*.csv"))
     class_to_id = {name: idx for idx, name in enumerate(class_names)}
@@ -164,7 +255,7 @@ def _resolve_label_slice(row_len: int, start: int, end: int) -> Tuple[int, int]:
     return start_idx, end_idx
 
 
-def _load_csv_regression_split(ds: CsvRegressionDataset, split_dir: Path):
+def _load_windowed_regression_split(ds: WindowedRegressionDataset, split_dir: Path):
     length = ds.input_shape[1]
     features: List[torch.Tensor] = []
     targets: List[torch.Tensor] = []
@@ -184,6 +275,81 @@ def _load_csv_regression_split(ds: CsvRegressionDataset, split_dir: Path):
                 target = target.squeeze(0)
             features.append(feature)
             targets.append(target)
+
+    return features, targets
+
+
+def _resolve_continuous_feature_indices(
+    ds: ContinuousPerClassDataset, header: list[str] | None, row_len: int
+) -> list[int]:
+    if ds.feature_columns:
+        if not header:
+            raise ValueError(
+                "feature_columns requires has_header=true and a header row"
+            )
+        missing = [name for name in ds.feature_columns if name not in header]
+        if missing:
+            raise ValueError(f"feature_columns {missing} not found in header {header}")
+        indices = [header.index(name) for name in ds.feature_columns]
+    else:
+        time_col = ds.time_column
+        if time_col is None:
+            indices = list(range(row_len))
+        elif isinstance(time_col, int):
+            time_idx = time_col if time_col >= 0 else row_len + time_col
+            indices = [idx for idx in range(row_len) if idx != time_idx]
+        else:
+            if not header:
+                raise ValueError(
+                    "time_column by name requires has_header=true and a header row"
+                )
+            if time_col not in header:
+                raise ValueError(
+                    f"time_column '{time_col}' not found in header {header}"
+                )
+            time_idx = header.index(time_col)
+            indices = [idx for idx in range(row_len) if idx != time_idx]
+
+    if len(indices) != ds.num_features:
+        raise ValueError(
+            f"continuous_per_class_csv expects {ds.num_features} feature columns after "
+            f"dropping timestamp, got {len(indices)}"
+        )
+    return indices
+
+
+def _load_continuous_per_class_split(ds: ContinuousPerClassDataset, split_dir: Path):
+    class_names = ds.class_names or sorted(
+        p.name for p in split_dir.iterdir() if p.is_dir()
+    )
+    class_to_id = {name: idx for idx, name in enumerate(class_names)}
+    features: List[torch.Tensor] = []
+    targets: List[torch.Tensor] = []
+
+    for class_dir in sorted(split_dir.iterdir()):
+        if not class_dir.is_dir() or class_dir.name not in class_to_id:
+            continue
+        class_id = class_to_id[class_dir.name]
+        for csv_path in sorted(class_dir.glob("*.csv")):
+            header, rows = _read_string_rows(csv_path, ds.delimiter, ds.has_header)
+            if not rows:
+                continue
+            feature_indices = _resolve_continuous_feature_indices(
+                ds, header, len(rows[0])
+            )
+            sequence = np.array(
+                [[float(row[idx]) for idx in feature_indices] for row in rows],
+                dtype=np.float32,
+            )
+            if sequence.shape[0] < ds.window_size:
+                continue
+            for start in range(
+                0, sequence.shape[0] - ds.window_size + 1, ds.window_stride
+            ):
+                window = sequence[start : start + ds.window_size]
+                feature = torch.from_numpy(window.transpose(1, 0).copy())
+                features.append(feature)
+                targets.append(torch.tensor(class_id, dtype=torch.long))
 
     return features, targets
 
@@ -209,7 +375,10 @@ def create_dataloaders(cfg: EasyAIConfig) -> Tuple[DataLoader, DataLoader]:
 
 def create_calibration_dataloader(cfg: EasyAIConfig) -> DataLoader:
     dataset, num_samples = _select_calibration_dataset(cfg)
-    subset = torch.utils.data.Subset(dataset, range(num_samples))
+    subset = torch.utils.data.Subset(
+        dataset,
+        _build_calibration_indices(dataset, num_samples, cfg.task.type, cfg.seed),
+    )
     return DataLoader(
         subset,
         batch_size=1,
@@ -223,10 +392,7 @@ def _dataset_to_numpy(dataset: Dataset, task_type: TaskType, input_dim: int):
     targets = []
     for idx in range(len(dataset)):
         x, y = dataset[idx]
-        if input_dim == 1:
-            x = x.transpose(0, 1).contiguous()
-        else:
-            x = x.permute(1, 2, 0).contiguous()
+        x = x.transpose(0, 1).contiguous()
         features.append(x.numpy())
         if isinstance(y, torch.Tensor):
             targets.append(y.numpy())
@@ -251,12 +417,10 @@ def create_array_datasets(cfg: EasyAIConfig):
 
 def create_calibration_arrays(cfg: EasyAIConfig):
     dataset, num_samples = _select_calibration_dataset(cfg)
+    indices = _build_calibration_indices(dataset, num_samples, cfg.task.type, cfg.seed)
     features = []
-    for idx in range(num_samples):
+    for idx in indices:
         x, _ = dataset[idx]
-        if cfg.task.input_dim == 1:
-            x = x.transpose(0, 1).contiguous()
-        else:
-            x = x.permute(1, 2, 0).contiguous()
+        x = x.transpose(0, 1).contiguous()
         features.append(x.numpy())
     return np.stack(features)
